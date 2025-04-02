@@ -1,106 +1,113 @@
-import express from 'express';
-import puppeteer from 'puppeteer';
-import fs from 'fs';
-import path from 'path';
-import readline from 'readline';
-import { fileURLToPath } from 'url';
+import puppeteer from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
+import fs from "fs/promises";
 
-const app = express();
-const PORT = process.env.PORT || 8080;
+puppeteer.use(StealthPlugin());
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-app.use(express.json());
-
-const getProxies = async () => {
-  const fileStream = fs.createReadStream(path.join(__dirname, 'proxies.txt'));
-  const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
-  const proxies = [];
-  for await (const line of rl) {
-    const cleaned = line.trim();
-    if (cleaned && !cleaned.startsWith('#')) proxies.push(cleaned);
+async function getProxies() {
+  try {
+    const content = await fs.readFile("proxies.txt", "utf-8");
+    const proxies = content
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"));
+    return proxies;
+  } catch (error) {
+    console.error("Error loading proxies:", error);
+    return [];
   }
-  return proxies;
-};
+}
 
-const getRandomProxy = (proxies) => proxies[Math.floor(Math.random() * proxies.length)];
+function getRandomProxy(proxies) {
+  const proxy = proxies[Math.floor(Math.random() * proxies.length)];
+  if (!proxy) return null;
 
-const isBotBlocked = async (page) => {
-  const bodyText = await page.content();
-  return bodyText.includes('captcha-delivery') || bodyText.includes('datadome') || bodyText.includes('bot detection');
-};
+  const [host, port, username, password] = proxy.split(":");
+  return { host, port, username, password };
+}
 
-const scrapeListing = async (url, proxy) => {
-  const [ip, port, user, pass] = proxy.split(':');
+export async function scrapeEtsy(url) {
+  const proxies = await getProxies();
+  const selectedProxy = getRandomProxy(proxies);
+  const proxyUrl = selectedProxy
+    ? `--proxy-server=http://${selectedProxy.host}:${selectedProxy.port}`
+    : null;
 
-  const browser = await puppeteer.launch({
-    args: [
-      `--proxy-server=http://${ip}:${port}`,
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-    ],
+  const launchOptions = {
     headless: true,
-  });
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+    ],
+  };
 
-  const page = await browser.newPage();
-
-  if (user && pass) {
-    await page.authenticate({ username: user, password: pass });
+  if (proxyUrl) {
+    launchOptions.args.push(proxyUrl);
+    console.log("Using proxy:", proxyUrl);
   }
+
+  let browser;
 
   try {
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+    browser = await puppeteer.launch(launchOptions);
+    const page = await browser.newPage();
 
-    if (await isBotBlocked(page)) {
-      throw new Error('Bot detection triggered');
+    if (selectedProxy && selectedProxy.username && selectedProxy.password) {
+      await page.authenticate({
+        username: selectedProxy.username,
+        password: selectedProxy.password,
+      });
     }
+
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+    );
+
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+
+    await page.waitForTimeout(4000); // wait for page to settle
+    await page.screenshot({ path: "/tmp/etsy_debug_screenshot.png" });
 
     const data = await page.evaluate(() => {
-      const title = document.querySelector('h1[data-buy-box-listing-title]')?.innerText || 'N/A';
-      const price = document.querySelector('[data-buy-box-region="price"]')?.innerText || 'N/A';
-      const shopName = document.querySelector('div[data-region="shop-name"] a')?.innerText || 'N/A';
-      const rating = document.querySelector('[data-average-rating]')?.getAttribute('data-average-rating') || 'N/A';
-      const reviews = document.querySelector('[data-review-count]')?.getAttribute('data-review-count') || 'N/A';
-      return { title, price, shopName, rating, reviews };
+      const title =
+        document.querySelector("h1[data-buy-box-listing-title]")?.innerText ??
+        null;
+
+      const price =
+        document
+          .querySelector('[data-buy-box-region="price"] p')?.textContent?.trim() ?? null;
+
+      const shopName =
+        document.querySelector('span[data-shop-name]')?.innerText ??
+        document.querySelector('div[data-region="shop-name"] a')?.innerText ??
+        null;
+
+      const rating =
+        document.querySelector('[data-region="rating"] span[aria-hidden="true"]')
+          ?.innerText ?? null;
+
+      const reviews =
+        document.querySelector('[data-region="rating"] span.text-body-sm')
+          ?.innerText ?? null;
+
+      return {
+        title: title || "N/A",
+        price: price || "N/A",
+        shopName: shopName || "N/A",
+        rating: rating || "N/A",
+        reviews: reviews || "N/A",
+      };
     });
 
-    await browser.close();
     return data;
-  } catch (err) {
-    await browser.close();
-    throw err;
-  }
-};
-
-app.post('/scrape', async (req, res) => {
-  const { url } = req.body;
-  if (!url || !url.includes('etsy.com/listing')) {
-    return res.status(400).json({ error: 'Invalid Etsy listing URL' });
-  }
-
-  const proxies = await getProxies();
-  let attempts = 0;
-  let result = null;
-
-  while (attempts < 3) {
-    const proxy = getRandomProxy(proxies);
-    try {
-      console.log(`🧪 Attempt ${attempts + 1} with proxy ${proxy}`);
-      result = await scrapeListing(url, proxy);
-      return res.json(result);
-    } catch (err) {
-      console.warn(`❌ Failed with proxy ${proxy}: ${err.message}`);
-      attempts++;
+  } catch (error) {
+    console.error("❌ Scraping error:", error.message);
+    return { error: "Scraping failed", details: error.message };
+  } finally {
+    if (browser) {
+      await browser.close();
     }
   }
-
-  return res.status(500).json({
-    error: 'Scraping failed',
-    details: 'All proxy attempts were blocked or failed',
-  });
-});
-
-app.listen(PORT, () => {
-  console.log(`🚀 Server listening on port ${PORT}`);
-});
+}
