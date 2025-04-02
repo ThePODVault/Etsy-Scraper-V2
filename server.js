@@ -6,7 +6,7 @@ const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
-const SCRAPER_API_KEY = "YOUR_SCRAPERAPI_KEY"; // Replace with your real key
+const SCRAPER_API_KEY = "8b6407774a0552c357c86a458d6b7169"; // Replace with your real key
 
 async function scrapeListing(url) {
   const apiUrl = `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(url)}`;
