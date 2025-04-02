@@ -7,13 +7,11 @@ puppeteer.use(StealthPlugin());
 async function getProxies() {
   try {
     const content = await fs.readFile("proxies.txt", "utf-8");
-    const proxies = content
+    return content
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line && !line.startsWith("#"));
-    return proxies;
-  } catch (error) {
-    console.error("Error loading proxies:", error);
+  } catch {
     return [];
   }
 }
@@ -21,7 +19,6 @@ async function getProxies() {
 function getRandomProxy(proxies) {
   const proxy = proxies[Math.floor(Math.random() * proxies.length)];
   if (!proxy) return null;
-
   const [host, port, username, password] = proxy.split(":");
   return { host, port, username, password };
 }
@@ -29,9 +26,7 @@ function getRandomProxy(proxies) {
 export async function scrapeEtsy(url) {
   const proxies = await getProxies();
   const selectedProxy = getRandomProxy(proxies);
-  const proxyUrl = selectedProxy
-    ? `--proxy-server=http://${selectedProxy.host}:${selectedProxy.port}`
-    : null;
+  const proxyUrl = selectedProxy ? `--proxy-server=http://${selectedProxy.host}:${selectedProxy.port}` : null;
 
   const launchOptions = {
     headless: true,
@@ -40,74 +35,54 @@ export async function scrapeEtsy(url) {
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
+      "--window-size=1920,1080",
     ],
   };
 
-  if (proxyUrl) {
-    launchOptions.args.push(proxyUrl);
-    console.log("Using proxy:", proxyUrl);
-  }
+  if (proxyUrl) launchOptions.args.push(proxyUrl);
 
   let browser;
-
   try {
     browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();
 
-    if (selectedProxy && selectedProxy.username && selectedProxy.password) {
+    if (selectedProxy?.username) {
       await page.authenticate({
         username: selectedProxy.username,
         password: selectedProxy.password,
       });
     }
 
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-    );
+    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
 
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
 
-    await page.waitForTimeout(4000); // wait for page to settle
-    await page.screenshot({ path: "/tmp/etsy_debug_screenshot.png" });
+    // NEW: Wait for title or fail after 10s
+    await page.waitForSelector("h1[data-buy-box-listing-title]", { timeout: 10000 });
+
+    // Screenshot for debug
+    await page.screenshot({ path: "/tmp/debug.png", fullPage: true });
 
     const data = await page.evaluate(() => {
-      const title =
-        document.querySelector("h1[data-buy-box-listing-title]")?.innerText ??
-        null;
-
-      const price =
-        document
-          .querySelector('[data-buy-box-region="price"] p')?.textContent?.trim() ?? null;
-
-      const shopName =
-        document.querySelector('span[data-shop-name]')?.innerText ??
-        document.querySelector('div[data-region="shop-name"] a')?.innerText ??
-        null;
-
-      const rating =
-        document.querySelector('[data-region="rating"] span[aria-hidden="true"]')
-          ?.innerText ?? null;
-
-      const reviews =
-        document.querySelector('[data-region="rating"] span.text-body-sm')
-          ?.innerText ?? null;
+      const getText = (selector) => {
+        const el = document.querySelector(selector);
+        return el ? el.innerText.trim() : null;
+      };
 
       return {
-        title: title || "N/A",
-        price: price || "N/A",
-        shopName: shopName || "N/A",
-        rating: rating || "N/A",
-        reviews: reviews || "N/A",
+        title: getText("h1[data-buy-box-listing-title]") || "N/A",
+        price: getText("p[data-buy-box-region='price']") || "N/A",
+        shopName: getText("div[data-region='shop-name'] a") || "N/A",
+        rating: getText("input[name='rating']") || "N/A",
+        reviews: getText("span[class*='wt-text-link-no-underline']") || "N/A",
       };
     });
 
     return data;
-  } catch (error) {
-    console.error("❌ Scraping error:", error.message);
-    return { error: "Scraping failed", details: error.message };
+  } catch (err) {
+    console.error("❌ Scraping error:", err.message);
+    return { error: "Scraping failed", details: err.message };
   } finally {
-    if (browser) {
-      await browser.close();
-    }
+    if (browser) await browser.close();
   }
 }
