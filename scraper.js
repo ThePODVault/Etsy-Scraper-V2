@@ -57,11 +57,13 @@ export async function scrapeEtsy(url) {
 
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
 
-    // NEW: Wait for title or fail after 10s
-    await page.waitForSelector("h1[data-buy-box-listing-title]", { timeout: 10000 });
+    // Wait for main title or fallback after 15s
+    await page.waitForSelector("h1[data-buy-box-listing-title]", { timeout: 15000 }).catch(() => {});
 
-    // Screenshot for debug
+    // DEBUG: Capture what the bot actually sees
     await page.screenshot({ path: "/tmp/debug.png", fullPage: true });
+    const html = await page.content();
+    await fs.writeFile("/tmp/debug.html", html); // Save full HTML
 
     const data = await page.evaluate(() => {
       const getText = (selector) => {
