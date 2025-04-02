@@ -1,12 +1,17 @@
 {
-  "name": "etsy-scraper-browserless",
+  "name": "etsy-scraper",
   "version": "1.0.0",
+  "description": "Etsy listing scraper with proxy rotation and bot detection",
+  "main": "server.js",
   "type": "module",
   "scripts": {
     "start": "node server.js"
   },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "express": "^4.18.2",
-    "puppeteer": "^21.11.0"
+    "puppeteer": "^22.8.2"
   }
 }
