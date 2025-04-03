@@ -1,25 +1,21 @@
 import express from "express";
-import dotenv from "dotenv";
+import cors from "cors";
 import { scrapeEtsy } from "./scraper.js";
 
-dotenv.config();
 const app = express();
-app.use(express.json());
+app.use(cors());
 
-app.post("/scrape", async (req, res) => {
-  const { url } = req.body;
+app.get("/scrape", async (req, res) => {
+  const { url } = req.query;
   if (!url) return res.status(400).json({ error: "Missing URL" });
 
   try {
     const data = await scrapeEtsy(url);
     res.json(data);
   } catch (err) {
-    console.error("Scraping error:", err.message);
-    res.status(500).json({ error: "Scraping failed", details: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
