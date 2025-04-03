@@ -36,7 +36,7 @@ export async function scrapeEtsy(url) {
       if (fallback) priceOptions.push(fallback);
     }
 
-    // JSON-LD metadata for shopName and total reviews
+    // JSON-LD metadata
     let shopName = "N/A";
     let reviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
@@ -55,35 +55,31 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // Listing-specific reviews
+    // Listing-specific reviews (extracted from UI)
     let listingReviews = "N/A";
-    try {
-      $("span").each((_, el) => {
-        const text = $(el).text().trim().toLowerCase();
-        const match = text.match(/^(\d[\d,]*)\s+reviews$/);
-        if (match) {
-          listingReviews = match[1].replace(/,/g, "");
-          return false; // break loop once found
-        }
-      });
-    } catch (err) {
-      console.warn("⚠️ Failed to extract listing-specific reviews:", err.message);
+    const listingReviewText = $("span[data-review-count]").text().trim();
+    const reviewMatch = listingReviewText.match(/\d[\d,]*/);
+    if (reviewMatch) {
+      listingReviews = reviewMatch[0].replace(/,/g, "");
     }
 
-    // Estimated Revenue (based on avg price and listingReviews)
-    let estimatedRevenue = "N/A";
-    if (listingReviews !== "N/A" && Array.isArray(priceOptions) && priceOptions.length > 0) {
-      const prices = priceOptions
-        .map((text) => {
-          const match = text.match(/[\$€£](\d+(\.\d+)?)/);
-          return match ? parseFloat(match[1]) : null;
-        })
-        .filter((num) => num !== null);
+    // Estimate average price
+    let avgPrice = null;
+    const prices = priceOptions
+      .map((p) => {
+        const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
+        return match ? parseFloat(match[1]) : null;
+      })
+      .filter((val) => val !== null);
 
-      if (prices.length > 0) {
-        const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
-        estimatedRevenue = (avgPrice * parseInt(listingReviews)).toFixed(2);
-      }
+    if (prices.length) {
+      avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
+    }
+
+    // Estimated revenue
+    let estimatedRevenue = "N/A";
+    if (avgPrice && listingReviews !== "N/A") {
+      estimatedRevenue = `$${Math.round(parseInt(listingReviews) * avgPrice).toLocaleString()}`;
     }
 
     return {
@@ -108,3 +104,4 @@ export async function scrapeEtsy(url) {
     };
   }
 }
+
