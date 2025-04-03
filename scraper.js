@@ -36,10 +36,9 @@ export async function scrapeEtsy(url) {
       if (fallback) priceOptions.push(fallback);
     }
 
-    // JSON-LD metadata
+    // JSON-LD metadata (shop name + total reviews)
     let shopName = "N/A";
     let reviews = "N/A";
-    let listingReviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
       try {
         const json = JSON.parse($(el).html());
@@ -56,25 +55,35 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // Try to get listing-level reviews separately
-    const reviewText = $("span[data-review-count]").text().trim();
-    const reviewMatch = reviewText.match(/\d[\d,]*/);
-    if (reviewMatch) {
-      listingReviews = reviewMatch[0].replace(/,/g, "");
+    // Listing-specific reviews
+    let listingReviews = "N/A";
+    const reviewSelectors = [
+      "span[data-review-count]",
+      ".wt-text-body-03.wt-nudge-b-2.wt-text-gray", // another possible location
+      "span.wt-text-caption" // generic fallback
+    ];
+    for (const selector of reviewSelectors) {
+      const reviewText = $(selector).text().trim();
+      const match = reviewText.match(/\d[\d,]*/);
+      if (match) {
+        listingReviews = match[0].replace(/,/g, "");
+        break;
+      }
     }
 
-    // Estimate average price from the parsed prices
+    // Estimate revenue
     let estimatedRevenue = "N/A";
     if (listingReviews !== "N/A" && priceOptions.length > 0) {
-      const priceNumbers = priceOptions
-        .map((p) => {
+      const prices = priceOptions
+        .map(p => {
           const match = p.match(/[\d,]+(\.\d{1,2})?/);
           return match ? parseFloat(match[0].replace(/,/g, "")) : null;
         })
-        .filter((p) => p !== null);
-      if (priceNumbers.length > 0) {
-        const averagePrice = priceNumbers.reduce((a, b) => a + b, 0) / priceNumbers.length;
-        estimatedRevenue = (averagePrice * parseInt(listingReviews)).toFixed(2);
+        .filter(p => p !== null);
+
+      if (prices.length > 0) {
+        const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+        estimatedRevenue = (avgPrice * parseInt(listingReviews)).toFixed(2);
       }
     }
 
@@ -85,7 +94,7 @@ export async function scrapeEtsy(url) {
       rating,
       reviews,
       listingReviews,
-      estimatedRevenue,
+      estimatedRevenue
     };
   } catch (error) {
     console.error("❌ Scraping error:", error.message);
@@ -96,7 +105,7 @@ export async function scrapeEtsy(url) {
       rating: "N/A",
       reviews: "N/A",
       listingReviews: "N/A",
-      estimatedRevenue: "N/A",
+      estimatedRevenue: "N/A"
     };
   }
 }
