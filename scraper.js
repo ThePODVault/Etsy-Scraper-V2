@@ -11,63 +11,53 @@ export async function scrapeEtsy(url) {
   const proxyUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
 
   try {
-    const response = await axios.get(proxyUrl);
+    const response = await axios.get(proxyUrl, {
+      headers: {
+        "Accept-Language": "en-US,en;q=0.9", // Force USD
+      },
+    });
+
     const $ = cheerio.load(response.data);
 
-    // Title
     const title = $("h1[data-buy-box-listing-title]").text().trim() || "N/A";
-
-    // Rating
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
-    // Price Options
     const priceOptions = [];
     $("select option").each((_, el) => {
       const text = $(el).text().trim();
-      if (text && /[\$€£]\d/.test(text)) {
+      if (text && /[\$]\d/.test(text)) {
         priceOptions.push(text);
       }
     });
 
-    // Fallback price
     if (priceOptions.length === 0) {
       let fallback = $("[data-buy-box-region='price']").text().trim();
       fallback = fallback.replace(/\s+/g, " ").replace(/Loading/i, "").trim();
       if (fallback) priceOptions.push(fallback);
     }
 
-    // JSON-LD metadata
     let shopName = "N/A";
     let reviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
       try {
         const json = JSON.parse($(el).html());
         if (json && json["@type"] === "Product") {
-          if (json?.brand?.name) {
-            shopName = json.brand.name;
-          }
-          if (json?.aggregateRating?.reviewCount) {
-            reviews = json.aggregateRating.reviewCount.toString();
-          }
+          if (json?.brand?.name) shopName = json.brand.name;
+          if (json?.aggregateRating?.reviewCount) reviews = json.aggregateRating.reviewCount.toString();
         }
-      } catch (err) {
-        // continue
-      }
+      } catch (_) {}
     });
 
-    // Listing-specific reviews (extracted from UI)
+    // Listing-specific review count
     let listingReviews = "N/A";
-    const listingReviewText = $("span[data-review-count]").text().trim();
-    const reviewMatch = listingReviewText.match(/\d[\d,]*/);
-    if (reviewMatch) {
-      listingReviews = reviewMatch[0].replace(/,/g, "");
-    }
+    const reviewMatch = $("span[data-review-count]").text().trim().match(/\d[\d,]*/);
+    if (reviewMatch) listingReviews = reviewMatch[0].replace(/,/g, "");
 
     // Estimate average price
     let avgPrice = null;
     const prices = priceOptions
       .map((p) => {
-        const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
+        const match = p.match(/[\$](\d+(?:\.\d+)?)/);
         return match ? parseFloat(match[1]) : null;
       })
       .filter((val) => val !== null);
