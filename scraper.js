@@ -55,23 +55,15 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // Listing-specific reviews
+    // 🟨 Listing-specific reviews (from main section above star rating)
     let listingReviews = "N/A";
-    const reviewSelectors = [
-      "span[data-review-count]",
-      ".wt-text-body-03.wt-nudge-b-2.wt-text-gray", // another possible location
-      "span.wt-text-caption" // generic fallback
-    ];
-    for (const selector of reviewSelectors) {
-      const reviewText = $(selector).text().trim();
-      const match = reviewText.match(/\d[\d,]*/);
-      if (match) {
-        listingReviews = match[0].replace(/,/g, "");
-        break;
-      }
+    const listingReviewSelector = $("span.wt-text-body-03.wt-nudge-b-2.wt-text-gray").first().text().trim();
+    const listingReviewMatch = listingReviewSelector.match(/\d[\d,]*/);
+    if (listingReviewMatch) {
+      listingReviews = listingReviewMatch[0].replace(/,/g, "");
     }
 
-    // Estimate revenue
+    // ✅ Estimated Revenue
     let estimatedRevenue = "N/A";
     if (listingReviews !== "N/A" && priceOptions.length > 0) {
       const prices = priceOptions
