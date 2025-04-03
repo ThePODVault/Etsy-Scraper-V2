@@ -36,7 +36,7 @@ export async function scrapeEtsy(url) {
       if (fallback) priceOptions.push(fallback);
     }
 
-    // JSON-LD metadata (shop name + total reviews)
+    // JSON-LD metadata for shop name and total reviews
     let shopName = "N/A";
     let reviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
@@ -55,63 +55,45 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // 🟨 Listing-specific reviews (fallbacks included)
-let listingReviews = "N/A";
-
-// Try 1: Standard Etsy selector
-let reviewBlock = $("span.wt-text-body-03.wt-nudge-b-2.wt-text-gray").first().text().trim();
-let match = reviewBlock.match(/\d[\d,]*/);
-
-// Try 2: Any nearby caption that mentions "review"
-if (!match) {
-  $("span.wt-text-caption").each((_, el) => {
-    const text = $(el).text().toLowerCase();
-    if (text.includes("review") && /\d/.test(text)) {
-      const found = text.match(/\d[\d,]*/);
-      if (found) match = found;
-    }
-  });
-}
-
-if (match) {
-  listingReviews = match[0].replace(/,/g, "");
-}
-
-// 🧮 Estimate revenue from average price × listing reviews
-let estimatedRevenue = "N/A";
-
-if (listingReviews !== "N/A" && Array.isArray(priceOptions) && priceOptions.length > 0) {
-  const prices = priceOptions
-    .map((text) => {
-      const match = text.match(/[\$€£](\d+(\.\d+)?)/);
-      return match ? parseFloat(match[1]) : null;
-    })
-    .filter((num) => num !== null);
-
-  if (prices.length > 0) {
-    const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
-    estimatedRevenue = (avgPrice * parseInt(listingReviews)).toFixed(2);
-  }
-}
-
-if (match) {
-  listingReviews = match[0].replace(/,/g, "");
-}
-
-    // ✅ Estimated Revenue
+    // New: Listing-specific reviews and revenue
+    let listingReviews = "N/A";
     let estimatedRevenue = "N/A";
-    if (listingReviews !== "N/A" && priceOptions.length > 0) {
-      const prices = priceOptions
-        .map(p => {
-          const match = p.match(/[\d,]+(\.\d{1,2})?/);
-          return match ? parseFloat(match[0].replace(/,/g, "")) : null;
-        })
-        .filter(p => p !== null);
 
-      if (prices.length > 0) {
-        const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
-        estimatedRevenue = (avgPrice * parseInt(listingReviews)).toFixed(2);
+    try {
+      // Try to find number of listing-specific reviews
+      let reviewBlock = $("span.wt-text-body-03.wt-nudge-b-2.wt-text-gray").first().text().trim();
+      let match = reviewBlock.match(/\d[\d,]*/);
+
+      if (!match) {
+        $("span.wt-text-caption").each((_, el) => {
+          const text = $(el).text().toLowerCase();
+          if (text.includes("review") && /\d/.test(text)) {
+            const found = text.match(/\d[\d,]*/);
+            if (found) match = found;
+          }
+        });
       }
+
+      if (match) {
+        listingReviews = match[0].replace(/,/g, "");
+      }
+
+      // Estimate revenue
+      if (listingReviews !== "N/A" && Array.isArray(priceOptions) && priceOptions.length > 0) {
+        const prices = priceOptions
+          .map((text) => {
+            const match = text.match(/[\$€£](\d+(\.\d+)?)/);
+            return match ? parseFloat(match[1]) : null;
+          })
+          .filter((num) => num !== null);
+
+        if (prices.length > 0) {
+          const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+          estimatedRevenue = (avgPrice * parseInt(listingReviews)).toFixed(2);
+        }
+      }
+    } catch (err) {
+      console.warn("⚠️ Failed to calculate listing reviews or revenue:", err.message);
     }
 
     return {
@@ -121,7 +103,7 @@ if (match) {
       rating,
       reviews,
       listingReviews,
-      estimatedRevenue
+      estimatedRevenue,
     };
   } catch (error) {
     console.error("❌ Scraping error:", error.message);
@@ -132,7 +114,7 @@ if (match) {
       rating: "N/A",
       reviews: "N/A",
       listingReviews: "N/A",
-      estimatedRevenue: "N/A"
+      estimatedRevenue: "N/A",
     };
   }
 }
