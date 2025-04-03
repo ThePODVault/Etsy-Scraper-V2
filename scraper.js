@@ -43,7 +43,7 @@ export async function scrapeEtsy(url) {
   // ✅ Rating
   const rating = $("input[name='rating']").attr("value") || "N/A";
 
-  // ✅ Reviews (Number only)
+  // ✅ Number of Reviews
   let reviews = "N/A";
   const reviewText = $("span[data-review-count]").text().trim();
   const reviewMatch = reviewText.match(/\d[\d,]*/);
@@ -80,7 +80,7 @@ export async function scrapeEtsy(url) {
     price,
     shopName,
     rating,
-    reviews,
+    reviews, // <-- Now shows just the number like "3418"
     image,
     categories: categories.length ? categories : "N/A",
     tags: tags.length ? tags : "N/A",
