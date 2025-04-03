@@ -29,14 +29,13 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // Fallback price
     if (priceOptions.length === 0) {
       let fallback = $("[data-buy-box-region='price']").text().trim();
       fallback = fallback.replace(/\s+/g, " ").replace(/Loading/i, "").trim();
       if (fallback) priceOptions.push(fallback);
     }
 
-    // JSON-LD metadata
+    // JSON-LD metadata for shop name & reviews
     let shopName = "N/A";
     let reviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
@@ -50,26 +49,23 @@ export async function scrapeEtsy(url) {
             reviews = json.aggregateRating.reviewCount.toString();
           }
         }
-      } catch (err) {
-        // skip invalid JSON
+      } catch {
+        // ignore
       }
     });
 
-    // Shop Sales
+    // 🟢 Shop Sales (visible in sidebar)
     let shopSales = "N/A";
-    $("*").each((_, el) => {
-      const text = $(el).text().trim();
-      if (/^[\d,]+\s+sales$/i.test(text)) {
-        const match = text.match(/^([\d,]+)\s+sales$/i);
-        if (match) {
-          shopSales = match[1].replace(/,/g, "");
-          return false; // break loop
-        }
-      }
-    });
+    const shopSalesText = $("div:contains('Sales')").filter((_, el) => {
+      return $(el).text().trim().match(/\d[\d,\.]*\s+Sales/);
+    }).first().text().trim();
+    const shopSalesMatch = shopSalesText.match(/(\d[\d,\.]*)\s+Sales/i);
+    if (shopSalesMatch) {
+      shopSales = shopSalesMatch[1].replace(/,/g, "");
+    }
 
-    // Estimate average price
-    let avgPrice = null;
+    // 🟢 Estimate Revenue
+    let estimatedRevenue = "N/A";
     const prices = priceOptions
       .map((p) => {
         const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
@@ -77,13 +73,8 @@ export async function scrapeEtsy(url) {
       })
       .filter((val) => val !== null);
 
-    if (prices.length) {
-      avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
-    }
-
-    // Estimated revenue
-    let estimatedRevenue = "N/A";
-    if (avgPrice && shopSales !== "N/A") {
+    if (shopSales !== "N/A" && prices.length > 0) {
+      const avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
       estimatedRevenue = `$${Math.round(parseInt(shopSales) * avgPrice).toLocaleString()}`;
     }
 
