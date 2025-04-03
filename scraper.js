@@ -8,8 +8,8 @@ export async function scrapeEtsy(url) {
   const apiKey = process.env.SCRAPER_API_KEY;
   if (!apiKey) throw new Error("SCRAPER_API_KEY not set");
 
-  const proxy = (url) =>
-    `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
+  const proxy = (targetUrl) =>
+    `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(targetUrl)}`;
 
   try {
     const response = await axios.get(proxy(url));
@@ -86,28 +86,39 @@ export async function scrapeEtsy(url) {
       $("a[href*='/category/']").last().text().trim() ||
       "N/A";
 
-    // Shop creation year and total sales from /about
+    // Shop Creation Year + Sales
     let shopCreationYear = "N/A";
     let shopSales = "N/A";
-
     if (shopName !== "N/A") {
       try {
         const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
         const aboutRes = await axios.get(proxy(aboutUrl));
         const $$ = cheerio.load(aboutRes.data);
 
-        $$(".wt-text-center.wt-text-caption").each((_, el) => {
-          const label = $$(el).find("p").last().text().trim().toLowerCase();
-          const value = $$(el).find("p").first().text().trim();
+        $$(".wt-text-caption").each((_, el) => {
+          const text = $$(el).text().toLowerCase();
 
-          if (label.includes("on etsy since")) {
-            shopCreationYear = value;
-          } else if (label.includes("sales")) {
-            shopSales = value.replace(/,/g, "");
+          if (text.includes("on etsy since")) {
+            const year = $$(el).next().text().trim().match(/\d{4}/);
+            if (year) shopCreationYear = year[0];
+          }
+
+          if (text.includes("sales")) {
+            const sales = text.match(/[\d,]+/);
+            if (sales) shopSales = sales[0].replace(",", "");
           }
         });
+
+        // Additional fallback: look for plain text
+        const bodyText = $$.text();
+        const yearMatch = bodyText.match(/opened in (\d{4})/i);
+        if (yearMatch) shopCreationYear = yearMatch[1];
+
+        const salesMatch = bodyText.match(/([\d,]+)\s+sales/i);
+        if (salesMatch) shopSales = salesMatch[1].replace(/,/g, "");
+
       } catch (err) {
-        console.error("❌ Failed to get shop creation year or sales:", err.message);
+        console.error("❌ Failed to get shop about info:", err.message);
       }
     }
 
