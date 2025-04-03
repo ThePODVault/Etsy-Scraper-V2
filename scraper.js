@@ -8,12 +8,10 @@ export async function scrapeEtsy(url) {
   const apiKey = process.env.SCRAPER_API_KEY;
   if (!apiKey) throw new Error("SCRAPER_API_KEY not set");
 
-  const proxy = (targetUrl) =>
-    `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(targetUrl)}`;
+  const proxyUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
 
   try {
-    // Fetch listing page
-    const response = await axios.get(proxy(url));
+    const response = await axios.get(proxyUrl);
     const $ = cheerio.load(response.data);
 
     // Title
@@ -38,59 +36,39 @@ export async function scrapeEtsy(url) {
       if (fallback) priceOptions.push(fallback);
     }
 
-    // JSON-LD Metadata
+    // JSON-LD metadata for shop name and reviews
     let shopName = "N/A";
     let reviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
       try {
         const json = JSON.parse($(el).html());
         if (json && json["@type"] === "Product") {
-          if (json?.brand?.name) shopName = json.brand.name;
+          if (json?.brand?.name) {
+            shopName = json.brand.name;
+          }
           if (json?.aggregateRating?.reviewCount) {
             reviews = json.aggregateRating.reviewCount.toString();
           }
         }
-      } catch {}
+      } catch {
+        // skip JSON parsing errors
+      }
     });
 
     // Description
     let description = "N/A";
-    const descSelector = $("div[data-id='description-text'] p").text().trim();
-    if (descSelector) description = descSelector;
-
-    // Category (breadcrumb)
-    const category =
-      $("ul[aria-label='Breadcrumb'] li")
-        .last()
-        .find("a")
-        .text()
-        .trim() || "N/A";
-
-    // All image URLs
-    const images = [];
-    $("img").each((_, el) => {
-      const src = $(el).attr("src");
-      if (src && src.includes("etsystatic")) images.push(src);
+    $("script[type='application/ld+json']").each((_, el) => {
+      try {
+        const json = JSON.parse($(el).html());
+        if (json && json.description) {
+          description = json.description.trim();
+        }
+      } catch {
+        // ignore
+      }
     });
 
-    // Extract shop link to scrape creation year
-    const shopUrl =
-      $("a[data-region='shop-name']").attr("href") ||
-      $("a[href*='/shop/']").attr("href");
-
-    // Shop creation year
-    let shopCreationYear = "N/A";
-    if (shopUrl) {
-      try {
-        const shopResponse = await axios.get(proxy(`https://www.etsy.com${shopUrl}`));
-        const $$ = cheerio.load(shopResponse.data);
-        const yearText = $$("div.wt-text-caption").text();
-        const match = yearText.match(/(\d{4})/);
-        if (match) shopCreationYear = match[1];
-      } catch {}
-    }
-
-    // Estimated Revenue
+    // Estimate average price
     let avgPrice = null;
     const prices = priceOptions
       .map((p) => {
@@ -98,14 +76,44 @@ export async function scrapeEtsy(url) {
         return match ? parseFloat(match[1]) : null;
       })
       .filter((val) => val !== null);
-
     if (prices.length) {
       avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
     }
 
+    // Estimated revenue
     let estimatedRevenue = "N/A";
     if (avgPrice && reviews !== "N/A") {
       estimatedRevenue = `$${Math.round(parseInt(reviews) * avgPrice).toLocaleString()}`;
+    }
+
+    // Images
+    const images = [];
+    $("img").each((_, el) => {
+      const src = $(el).attr("src");
+      if (src && src.includes("etsystatic.com") && !images.includes(src)) {
+        images.push(src);
+      }
+    });
+
+    // Shop Creation Year
+    let shopCreationYear = "N/A";
+    const shopUrlMatch = response.data.match(/"url":"https:\/\/www\.etsy\.com\/shop\/[^"]+/);
+    if (shopUrlMatch) {
+      const shopUrl = shopUrlMatch[0].replace(/\\u002F/g, "/").split('"url":"')[1];
+      const shopResponse = await axios.get(`http://api.scraperapi.com?api_key=${apiKey}&url=${shopUrl}`);
+      const $shop = cheerio.load(shopResponse.data);
+      const foundedText = $shop("div.shop-home-about-section div.wt-text-caption").text();
+      const yearMatch = foundedText.match(/since\s+(\d{4})/i);
+      if (yearMatch) {
+        shopCreationYear = yearMatch[1];
+      }
+    }
+
+    // Category (breadcrumb)
+    let category = "N/A";
+    const breadcrumbs = $("ul[aria-label='Breadcrumb'] li a").map((_, el) => $(el).text().trim()).get();
+    if (breadcrumbs.length > 1) {
+      category = breadcrumbs[breadcrumbs.length - 1];
     }
 
     return {
