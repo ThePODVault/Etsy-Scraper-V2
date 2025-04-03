@@ -17,34 +17,32 @@ export async function scrapeEtsy(url) {
     // Title
     const title = $("h1[data-buy-box-listing-title]").text().trim() || "N/A";
 
-    // Prices (handle all variant sizes)
+    // Prices from dropdown (variation)
     const priceOptions = [];
     $("select#inventory-variation-select-0 option").each((i, el) => {
       const text = $(el).text().trim();
-      if (text && !text.toLowerCase().includes("select") && /\$\d/.test(text)) {
+      if (text && /\$\d/.test(text)) {
         priceOptions.push(text);
       }
     });
 
-    // Shop Name
+    // Shop name (robust selectors)
     const shopName =
-      $("div.shop-name-and-title-container span.text-body-larger").text().trim() ||
-      $("[data-buy-box-region='seller-name']").text().trim() ||
+      $("div[data-region='shop-name'] a").first().text().trim() ||
+      $("div.shop-name-and-title-container span.text-body-larger").first().text().trim() ||
       "N/A";
 
     // Rating
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
-    // Number of Reviews
+    // Number of reviews (clean digits only)
     let reviews =
-      $('span[data-review-count]').text().trim() ||
-      $('a[href*="#reviews"] span').text().trim() ||
-      $('a[href*="#reviews"]').text().trim() ||
-      $('span:contains("reviews")').first().text().trim();
+      $("span[data-review-count]").text().trim() ||
+      $("span:contains('reviews')").first().text().trim() ||
+      "N/A";
 
-    if (reviews && !/\d/.test(reviews)) {
-      reviews = "N/A";
-    }
+    const match = reviews.replace(/[^\d]/g, "");
+    reviews = match || "N/A";
 
     return {
       title,
@@ -64,3 +62,4 @@ export async function scrapeEtsy(url) {
     };
   }
 }
+
