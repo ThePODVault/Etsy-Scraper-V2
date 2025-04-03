@@ -15,10 +15,7 @@ export async function scrapeEtsy(url) {
     const response = await axios.get(proxy(url));
     const $ = cheerio.load(response.data);
 
-    // Title
     const title = $("h1[data-buy-box-listing-title]").text().trim() || "N/A";
-
-    // Rating
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
     // Price Options
@@ -28,32 +25,28 @@ export async function scrapeEtsy(url) {
       if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
     });
 
-    // Fallback price
     if (priceOptions.length === 0) {
       let fallback = $("[data-buy-box-region='price']").text().trim();
       fallback = fallback.replace(/\s+/g, " ").replace(/Loading/i, "").trim();
       if (fallback) priceOptions.push(fallback);
     }
 
-    // JSON-LD metadata
     let shopName = "N/A";
-    let reviews = "N/A";
+    let listingReviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
       try {
         const json = JSON.parse($(el).html());
         if (json["@type"] === "Product") {
           if (json?.brand?.name) shopName = json.brand.name;
           if (json?.aggregateRating?.reviewCount)
-            reviews = json.aggregateRating.reviewCount.toString();
+            listingReviews = json.aggregateRating.reviewCount.toString();
         }
       } catch (err) {}
     });
 
-    // Description
     const rawDesc = $("[data-id='description-text']").text().trim();
     const description = rawDesc || "N/A";
 
-    // Images
     const images = [];
     $("img").each((_, el) => {
       const src = $(el).attr("src") || $(el).attr("data-src");
@@ -62,7 +55,6 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // Estimate average price
     const prices = priceOptions
       .map((p) => {
         const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
@@ -74,44 +66,39 @@ export async function scrapeEtsy(url) {
         ? prices.reduce((sum, p) => sum + p, 0) / prices.length
         : null;
 
-    // Estimated Revenue
     const estimatedRevenue =
-      avgPrice && reviews !== "N/A"
-        ? `$${Math.round(parseInt(reviews) * avgPrice).toLocaleString()}`
+      avgPrice && listingReviews !== "N/A"
+        ? `$${Math.round(parseInt(listingReviews) * avgPrice).toLocaleString()}`
         : "N/A";
 
-    // Category
     const category =
       $("a[href*='/c/']").last().text().trim() ||
       $("a[href*='/category/']").last().text().trim() ||
       "N/A";
 
-    // Shop Creation Year + Sales
+    // Shop-level details
     let shopCreationYear = "N/A";
     let shopSales = "N/A";
-
     if (shopName !== "N/A") {
       try {
         const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
         const aboutRes = await axios.get(proxy(aboutUrl));
         const $$ = cheerio.load(aboutRes.data);
-        const bodyText = $$.text();
 
-        // Extract creation year
-        const yearMatch =
-          bodyText.match(/opened in (\d{4})/i) ||
-          bodyText.match(/on etsy since (\d{4})/i);
-        if (yearMatch) {
-          shopCreationYear = yearMatch[1];
-        }
+        $$("p.wt-text-caption").each((_, el) => {
+          const text = $$(el).text().trim();
+          if (text.includes("Etsy since")) {
+            const yearMatch = text.match(/\b(19|20)\d{2}\b/);
+            if (yearMatch) shopCreationYear = yearMatch[0];
+          }
+        });
 
-        // Extract total sales
-        const salesMatch = bodyText.match(/([\d,]+)\s+sales/i);
-        if (salesMatch) {
-          shopSales = salesMatch[1].replace(/,/g, "");
-        }
+        $$("p.wt-text-title-01").each((_, el) => {
+          const text = $$(el).text().replace(/[,+]/g, "").trim();
+          if (/^\d+$/.test(text)) shopSales = text;
+        });
       } catch (err) {
-        console.error("❌ Failed to scrape about page:", err.message);
+        console.error("❌ Failed shop/about scrape:", err.message);
       }
     }
 
@@ -120,7 +107,7 @@ export async function scrapeEtsy(url) {
       price: priceOptions.length > 0 ? priceOptions : "N/A",
       shopName,
       rating,
-      reviews,
+      listingReviews,
       estimatedRevenue,
       description,
       category,
@@ -135,7 +122,7 @@ export async function scrapeEtsy(url) {
       price: "N/A",
       shopName: "N/A",
       rating: "N/A",
-      reviews: "N/A",
+      listingReviews: "N/A",
       estimatedRevenue: "N/A",
       description: "N/A",
       category: "N/A",
