@@ -12,7 +12,6 @@ export async function scrapeEtsy(url) {
     `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(targetUrl)}`;
 
   try {
-    // Load listing page
     const response = await axios.get(proxy(url));
     const $ = cheerio.load(response.data);
 
@@ -50,8 +49,11 @@ export async function scrapeEtsy(url) {
       } catch (_) {}
     });
 
-    // Description
-    const description = $("meta[name='description']").attr("content") || "N/A";
+    // Full Product Description (not meta)
+    let description =
+      $("[data-id='description-text']").text().trim() ||
+      $("div[data-selector='description'] p").text().trim() ||
+      "N/A";
 
     // Category (breadcrumb)
     const category =
@@ -83,14 +85,22 @@ export async function scrapeEtsy(url) {
       estimatedRevenue = `$${Math.round(parseInt(reviews) * avgPrice).toLocaleString()}`;
     }
 
-    // Get Shop Creation Year from About page
+    // Shop Creation Year from /about page
     let shopCreationYear = "N/A";
-    const shopUrl = `https://www.etsy.com/shop/${shopName}/about`;
-    const aboutPage = await axios.get(proxy(shopUrl));
-    const $$ = cheerio.load(aboutPage.data);
-    const aboutText = $$("p:contains('On Etsy since')").parent().text();
-    const yearMatch = aboutText.match(/On Etsy since\s*(\d{4})/i);
-    if (yearMatch) shopCreationYear = yearMatch[1];
+    if (shopName !== "N/A") {
+      const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
+      const aboutRes = await axios.get(proxy(aboutUrl));
+      const $$ = cheerio.load(aboutRes.data);
+
+      $$("h4").each((_, el) => {
+        const heading = $$(el).text().trim();
+        if (heading.toLowerCase().includes("on etsy since")) {
+          const yearText = $$(el).next().text().trim();
+          const match = yearText.match(/\d{4}/);
+          if (match) shopCreationYear = match[0];
+        }
+      });
+    }
 
     return {
       title,
