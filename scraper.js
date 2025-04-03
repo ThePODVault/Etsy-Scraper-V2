@@ -51,17 +51,19 @@ export async function scrapeEtsy(url) {
           }
         }
       } catch {
-        // silent catch
+        // Ignore bad JSON blocks
       }
     });
 
-    // Shop sales
+    // Shop sales — scan for elements that mention "sales" nearby shop section
     let shopSales = "N/A";
-    $("div:contains('Sales')").each((_, el) => {
-      const text = $(el).text();
-      const match = text.match(/(\d[\d,]*)\s+Sales/);
-      if (match) {
-        shopSales = match[1].replace(/,/g, "");
+    $("div.wt-text-caption").each((_, el) => {
+      const text = $(el).text().trim();
+      if (/sales/i.test(text)) {
+        const match = text.match(/(\d[\d,]*)\s+sales/i);
+        if (match) {
+          shopSales = match[1].replace(/,/g, "");
+        }
       }
     });
 
