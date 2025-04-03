@@ -20,11 +20,11 @@ export async function scrapeEtsy(url) {
     // Rating
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
-    // Prices (dropdown options)
+    // Price Options
     const priceOptions = [];
-    $("select#inventory-variation-select-0 option").each((_, el) => {
+    $("select option").each((_, el) => {
       const text = $(el).text().trim();
-      if (text && /\$\d|\£\d/.test(text)) {
+      if (text && /[\$€£]\d/.test(text)) {
         priceOptions.push(text);
       }
     });
@@ -36,7 +36,7 @@ export async function scrapeEtsy(url) {
       if (fallback) priceOptions.push(fallback);
     }
 
-    // 📦 Attempt to parse JSON-LD metadata for shop name & reviews
+    // JSON-LD metadata
     let shopName = "N/A";
     let reviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
@@ -51,7 +51,7 @@ export async function scrapeEtsy(url) {
           }
         }
       } catch (err) {
-        // Skip if JSON parse fails
+        // continue
       }
     });
 
