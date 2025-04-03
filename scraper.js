@@ -1,13 +1,11 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
 import dotenv from "dotenv";
-import OpenAI from "openai";
+import { OpenAI } from "openai";
 
 dotenv.config();
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export async function scrapeEtsy(url) {
   const apiKey = process.env.SCRAPER_API_KEY;
@@ -79,7 +77,7 @@ export async function scrapeEtsy(url) {
         ? prices.reduce((sum, p) => sum + p, 0) / prices.length
         : null;
 
-    // Estimated Total Revenue
+    // Estimated Revenue
     const estimatedRevenue =
       avgPrice && reviews !== "N/A"
         ? `$${Math.round(parseInt(reviews) * avgPrice).toLocaleString()}`
@@ -102,7 +100,6 @@ export async function scrapeEtsy(url) {
         const $$ = cheerio.load(aboutRes.data);
         const bodyText = $$.text();
 
-        // Extract creation year
         const yearMatch =
           bodyText.match(/opened in (\d{4})/i) ||
           bodyText.match(/on etsy since (\d{4})/i);
@@ -110,7 +107,6 @@ export async function scrapeEtsy(url) {
           shopCreationYear = yearMatch[1];
         }
 
-        // Extract total sales
         const salesMatch = bodyText.match(/([\d,]+)\s+sales/i);
         if (salesMatch) {
           shopSales = salesMatch[1].replace(/,/g, "");
@@ -120,45 +116,22 @@ export async function scrapeEtsy(url) {
       }
     }
 
-    // Estimate monthly sales (based on review count)
-    let estimatedMonthlySales = "N/A";
-    let estimatedMonthlyRevenue = "N/A";
-    if (
-      reviews !== "N/A" &&
-      shopCreationYear !== "N/A" &&
-      avgPrice !== null
-    ) {
-      const monthsActive =
-        new Date().getFullYear() * 12 +
-        new Date().getMonth() -
-        (parseInt(shopCreationYear) * 12 + 0);
-      const estimatedMonthly = Math.round(parseInt(reviews) / monthsActive);
-      estimatedMonthlySales = estimatedMonthly.toString();
-      estimatedMonthlyRevenue = `$${Math.round(estimatedMonthly * avgPrice).toLocaleString()}`;
-    }
+    // AI-generated Tags
+    let tags = [];
+    try {
+      const prompt = `Extract 10 high-performing Etsy SEO tags based on this listing title and description. Only return the tags as a clean JSON array of strings. No extra text.\n\nTitle: ${title}\n\nDescription: ${description}\n\nTags:`;
+      const chat = await openai.chat.completions.create({
+        model: "gpt-4",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.4,
+      });
 
-    // Inferred Tags using OpenAI
-    let inferredTags = [];
-    if (process.env.OPENAI_API_KEY) {
-      try {
-        const prompt = `Extract 13 high-ranking Etsy SEO tags (1–20 characters each) based on the following title and description. Return as a JSON array.
-
-Title: ${title}
-Description: ${description}`;
-
-        const completion = await openai.chat.completions.create({
-          model: "gpt-3.5-turbo",
-          messages: [{ role: "user", content: prompt }],
-        });
-
-        const responseText = completion.choices[0].message.content;
-        const extracted = JSON.parse(responseText);
-        if (Array.isArray(extracted)) {
-          inferredTags = extracted.slice(0, 13).map((tag) => tag.trim());
-        }
-      } catch (err) {
-        console.error("❌ Failed to generate inferred tags:", err.message);
+      const jsonMatch = chat.choices[0].message.content.match(/\[.*\]/s);
+      if (jsonMatch) {
+        tags = JSON.parse(jsonMatch[0]);
       }
+    } catch (err) {
+      console.error("❌ Failed to generate tags with OpenAI:", err.message);
     }
 
     return {
@@ -168,14 +141,12 @@ Description: ${description}`;
       rating,
       listingReviews: reviews,
       estimatedRevenue,
-      estimatedMonthlySales,
-      estimatedMonthlyRevenue,
       description,
       category,
       images: [...new Set(images)],
       shopCreationYear,
       shopSales,
-      inferredTags,
+      tags,
     };
   } catch (err) {
     console.error("❌ Scraping error:", err.message);
@@ -186,14 +157,12 @@ Description: ${description}`;
       rating: "N/A",
       listingReviews: "N/A",
       estimatedRevenue: "N/A",
-      estimatedMonthlySales: "N/A",
-      estimatedMonthlyRevenue: "N/A",
       description: "N/A",
       category: "N/A",
       images: [],
       shopCreationYear: "N/A",
       shopSales: "N/A",
-      inferredTags: [],
+      tags: [],
     };
   }
 }
