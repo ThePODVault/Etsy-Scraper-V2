@@ -1,5 +1,5 @@
 import axios from "axios";
-import cheerio from "cheerio";
+import * as cheerio from "cheerio";
 
 const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY;
 
