@@ -39,6 +39,7 @@ export async function scrapeEtsy(url) {
     // JSON-LD metadata
     let shopName = "N/A";
     let reviews = "N/A";
+    let listingReviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
       try {
         const json = JSON.parse($(el).html());
@@ -48,6 +49,7 @@ export async function scrapeEtsy(url) {
           }
           if (json?.aggregateRating?.reviewCount) {
             reviews = json.aggregateRating.reviewCount.toString();
+            listingReviews = reviews; // Use same number if per-listing not separately available
           }
         }
       } catch (err) {
@@ -55,15 +57,7 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // Listing-specific reviews (from UI)
-    let listingReviews = "N/A";
-    const listingReviewText = $("span[data-review-count]").text().trim();
-    const reviewMatch = listingReviewText.match(/\d[\d,]*/);
-    if (reviewMatch) {
-      listingReviews = reviewMatch[0].replace(/,/g, "");
-    }
-
-    // Average price calculation
+    // Estimate average price
     let avgPrice = null;
     const prices = priceOptions
       .map((p) => {
