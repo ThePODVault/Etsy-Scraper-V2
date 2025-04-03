@@ -8,8 +8,8 @@ export async function scrapeEtsy(url) {
   const apiKey = process.env.SCRAPER_API_KEY;
   if (!apiKey) throw new Error("SCRAPER_API_KEY not set");
 
-  const proxy = (targetUrl) =>
-    `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(targetUrl)}`;
+  const proxy = (url) =>
+    `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
 
   try {
     const response = await axios.get(proxy(url));
@@ -41,29 +41,25 @@ export async function scrapeEtsy(url) {
     $("script[type='application/ld+json']").each((_, el) => {
       try {
         const json = JSON.parse($(el).html());
-        if (json && json["@type"] === "Product") {
+        if (json["@type"] === "Product") {
           if (json?.brand?.name) shopName = json.brand.name;
           if (json?.aggregateRating?.reviewCount)
             reviews = json.aggregateRating.reviewCount.toString();
         }
-      } catch (_) {}
+      } catch (err) {}
     });
 
-    // Full Product Description (not meta)
-    let description =
-      $("[data-id='description-text']").text().trim() ||
-      $("div[data-selector='description'] p").text().trim() ||
-      "N/A";
-
-    // Category (breadcrumb)
-    const category =
-      $("ul[aria-label='Breadcrumb'] li:last-child a").text().trim() || "N/A";
+    // Description
+    const rawDesc = $("[data-id='description-text']").text().trim();
+    const description = rawDesc || "N/A";
 
     // Images
     const images = [];
     $("img").each((_, el) => {
-      const src = $(el).attr("src");
-      if (src && src.includes("il_")) images.push(src);
+      const src = $(el).attr("src") || $(el).attr("data-src");
+      if (src && src.includes("etsystatic")) {
+        images.push(src.split("?")[0]);
+      }
     });
 
     // Estimate average price
@@ -73,38 +69,46 @@ export async function scrapeEtsy(url) {
         return match ? parseFloat(match[1]) : null;
       })
       .filter((val) => val !== null);
-
     const avgPrice =
       prices.length > 0
         ? prices.reduce((sum, p) => sum + p, 0) / prices.length
         : null;
 
-    // Estimated revenue
-    let estimatedRevenue = "N/A";
-    if (avgPrice && reviews !== "N/A") {
-      estimatedRevenue = `$${Math.round(parseInt(reviews) * avgPrice).toLocaleString()}`;
-    }
+    // Estimated Revenue
+    const estimatedRevenue =
+      avgPrice && reviews !== "N/A"
+        ? `$${Math.round(parseInt(reviews) * avgPrice).toLocaleString()}`
+        : "N/A";
 
-    // Shop Creation Year from /about page
-let shopCreationYear = "N/A";
-if (shopName !== "N/A") {
-  try {
-    const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
-    const aboutRes = await axios.get(proxy(aboutUrl));
-    const $$ = cheerio.load(aboutRes.data);
+    // Category
+    const category =
+      $("a[href*='/c/']").last().text().trim() ||
+      $("a[href*='/category/']").last().text().trim() ||
+      "N/A";
 
-    $$("h4").each((_, el) => {
-      const heading = $$(el).text().trim().toLowerCase();
-      if (heading.includes("on etsy since")) {
-        const nextText = $$(el).next().text().trim();
-        const yearMatch = nextText.match(/\d{4}/);
-        if (yearMatch) shopCreationYear = yearMatch[0];
+    // Shop creation year from /about
+    let shopCreationYear = "N/A";
+    if (shopName !== "N/A") {
+      try {
+        const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
+        const aboutRes = await axios.get(proxy(aboutUrl));
+        const $$ = cheerio.load(aboutRes.data);
+
+        $$(".wt-text-body-01").each((_, el) => {
+          const text = $$(el).text().trim();
+          if (text.toLowerCase().includes("on etsy since")) {
+            const yearNode = $$(el).next();
+            const yearText = yearNode.text().trim();
+            const yearMatch = yearText.match(/\d{4}/);
+            if (yearMatch) {
+              shopCreationYear = yearMatch[0];
+            }
+          }
+        });
+      } catch (err) {
+        console.error("❌ Shop creation fetch failed:", err.message);
       }
-    });
-  } catch (err) {
-    console.error("Failed to fetch shop creation year:", err.message);
-  }
-}
+    }
 
     return {
       title,
@@ -118,8 +122,8 @@ if (shopName !== "N/A") {
       images: [...new Set(images)],
       shopCreationYear,
     };
-  } catch (error) {
-    console.error("❌ Scraping error:", error.message);
+  } catch (err) {
+    console.error("❌ Scraping error:", err.message);
     return {
       title: "N/A",
       price: "N/A",
