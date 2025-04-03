@@ -9,67 +9,45 @@ export async function scrapeEtsy(url) {
   if (!apiKey) throw new Error("SCRAPER_API_KEY not set");
 
   const proxyUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
+  const response = await axios.get(proxyUrl);
+  const $ = cheerio.load(response.data);
 
-  try {
-    const response = await axios.get(proxyUrl);
-    const $ = cheerio.load(response.data);
+  const title = $("h1[data-buy-box-listing-title]").text().trim() || "N/A";
+  const shopName = $("[data-buy-box-region=seller-name]").text().trim() || "N/A";
+  const rating = $("input[name=rating]").attr("value") || "N/A";
+  const reviews = $("span[data-review-count]").text().replace(/\D/g, "") || "N/A";
 
-    // Title
-    const title = $("h1[data-buy-box-listing-title]").text().trim() || "N/A";
+  const priceOptions = [];
+  $("[data-selector=select-option-title-price]").each((_, el) => {
+    const text = $(el).text().trim();
+    if (text) priceOptions.push(text);
+  });
 
-    // Rating
-    const rating = $("input[name='rating']").attr("value") || "N/A";
+  const description = $("div[data-id='description-text']").text().trim() || "N/A";
 
-    // Price Options
-    const priceOptions = [];
-    $("select option").each((_, el) => {
-      const text = $(el).text().trim();
-      if (text && /[\$€£]\d/.test(text)) {
-        priceOptions.push(text);
-      }
-    });
+  const image = $("img[data-index='0']").attr("src") || $("img").first().attr("src") || "N/A";
 
-    // Fallback price
-    if (priceOptions.length === 0) {
-      let fallback = $("[data-buy-box-region='price']").text().trim();
-      fallback = fallback.replace(/\s+/g, " ").replace(/Loading/i, "").trim();
-      if (fallback) priceOptions.push(fallback);
-    }
+  const categories = [];
+  $("ul[data-selector='breadcrumb-list'] li").each((_, el) => {
+    const category = $(el).text().trim();
+    if (category) categories.push(category);
+  });
 
-    // JSON-LD metadata
-    let shopName = "N/A";
-    let reviews = "N/A";
-    $("script[type='application/ld+json']").each((_, el) => {
-      try {
-        const json = JSON.parse($(el).html());
-        if (json && json["@type"] === "Product") {
-          if (json?.brand?.name) {
-            shopName = json.brand.name;
-          }
-          if (json?.aggregateRating?.reviewCount) {
-            reviews = json.aggregateRating.reviewCount.toString();
-          }
-        }
-      } catch (err) {
-        // continue
-      }
-    });
+  const tags = [];
+  $("a[href*='/search?q=']").each((_, el) => {
+    const tag = $(el).text().trim();
+    if (tag && !tags.includes(tag)) tags.push(tag);
+  });
 
-    return {
-      title,
-      price: priceOptions.length > 0 ? priceOptions : "N/A",
-      shopName,
-      rating,
-      reviews,
-    };
-  } catch (error) {
-    console.error("❌ Scraping error:", error.message);
-    return {
-      title: "N/A",
-      price: "N/A",
-      shopName: "N/A",
-      rating: "N/A",
-      reviews: "N/A",
-    };
-  }
+  return {
+    title,
+    price: priceOptions.length > 0 ? priceOptions : "N/A",
+    shopName,
+    rating,
+    reviews,
+    description,
+    image,
+    categories: categories.length > 0 ? categories : "N/A",
+    tags: tags.length > 0 ? tags : "N/A",
+  };
 }
