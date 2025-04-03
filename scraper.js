@@ -1,7 +1,7 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
 import dotenv from "dotenv";
-import { OpenAI } from "openai";
+import OpenAI from "openai";
 
 dotenv.config();
 
@@ -18,27 +18,21 @@ export async function scrapeEtsy(url) {
     const response = await axios.get(proxy(url));
     const $ = cheerio.load(response.data);
 
-    // Title
     const title = $("h1[data-buy-box-listing-title]").text().trim() || "N/A";
-
-    // Rating
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
-    // Price Options
     const priceOptions = [];
     $("select option").each((_, el) => {
       const text = $(el).text().trim();
       if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
     });
 
-    // Fallback price
     if (priceOptions.length === 0) {
       let fallback = $("[data-buy-box-region='price']").text().trim();
       fallback = fallback.replace(/\s+/g, " ").replace(/Loading/i, "").trim();
       if (fallback) priceOptions.push(fallback);
     }
 
-    // JSON-LD metadata
     let shopName = "N/A";
     let reviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
@@ -49,14 +43,12 @@ export async function scrapeEtsy(url) {
           if (json?.aggregateRating?.reviewCount)
             reviews = json.aggregateRating.reviewCount.toString();
         }
-      } catch (err) {}
+      } catch {}
     });
 
-    // Description
     const rawDesc = $("[data-id='description-text']").text().trim();
     const description = rawDesc || "N/A";
 
-    // Images
     const images = [];
     $("img").each((_, el) => {
       const src = $(el).attr("src") || $(el).attr("data-src");
@@ -65,31 +57,33 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // Estimate average price
     const prices = priceOptions
       .map((p) => {
         const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
         return match ? parseFloat(match[1]) : null;
       })
       .filter((val) => val !== null);
+
     const avgPrice =
       prices.length > 0
         ? prices.reduce((sum, p) => sum + p, 0) / prices.length
         : null;
 
-    // Estimated Revenue
-    const estimatedRevenue =
+    const estimatedMonthlyRevenue =
+      avgPrice && reviews !== "N/A"
+        ? `$${Math.round((parseInt(reviews) * avgPrice) / 12).toLocaleString()}`
+        : "N/A";
+
+    const estimatedYearlyRevenue =
       avgPrice && reviews !== "N/A"
         ? `$${Math.round(parseInt(reviews) * avgPrice).toLocaleString()}`
         : "N/A";
 
-    // Category
     const category =
       $("a[href*='/c/']").last().text().trim() ||
       $("a[href*='/category/']").last().text().trim() ||
       "N/A";
 
-    // Shop Creation Year + Sales
     let shopCreationYear = "N/A";
     let shopSales = "N/A";
 
@@ -103,9 +97,7 @@ export async function scrapeEtsy(url) {
         const yearMatch =
           bodyText.match(/opened in (\d{4})/i) ||
           bodyText.match(/on etsy since (\d{4})/i);
-        if (yearMatch) {
-          shopCreationYear = yearMatch[1];
-        }
+        if (yearMatch) shopCreationYear = yearMatch[1];
 
         const salesMatch = bodyText.match(/([\d,]+)\s+sales/i);
         if (salesMatch) {
@@ -116,22 +108,20 @@ export async function scrapeEtsy(url) {
       }
     }
 
-    // AI-generated Tags
+    // Generate AI Tags
     let tags = [];
     try {
-      const prompt = `Extract 10 high-performing Etsy SEO tags based on this listing title and description. Only return the tags as a clean JSON array of strings. No extra text.\n\nTitle: ${title}\n\nDescription: ${description}\n\nTags:`;
-      const chat = await openai.chat.completions.create({
-        model: "gpt-4",
+      const prompt = `Extract 10 high-converting Etsy tags from this listing title and description. Each tag must be 1–20 characters. Return them as a JSON array only:\n\nTitle: ${title}\n\nDescription: ${description}`;
+      const aiRes = await openai.chat.completions.create({
+        model: "gpt-3.5-turbo",
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.4,
+        temperature: 0.7,
       });
 
-      const jsonMatch = chat.choices[0].message.content.match(/\[.*\]/s);
-      if (jsonMatch) {
-        tags = JSON.parse(jsonMatch[0]);
-      }
+      const rawTags = JSON.parse(aiRes.choices[0].message.content);
+      tags = rawTags.filter((t) => typeof t === "string" && t.length <= 20);
     } catch (err) {
-      console.error("❌ Failed to generate tags with OpenAI:", err.message);
+      console.error("❌ Failed to generate tags:", err.message);
     }
 
     return {
@@ -140,7 +130,8 @@ export async function scrapeEtsy(url) {
       shopName,
       rating,
       listingReviews: reviews,
-      estimatedRevenue,
+      estimatedRevenue: estimatedYearlyRevenue,
+      estimatedMonthlyRevenue,
       description,
       category,
       images: [...new Set(images)],
@@ -157,6 +148,7 @@ export async function scrapeEtsy(url) {
       rating: "N/A",
       listingReviews: "N/A",
       estimatedRevenue: "N/A",
+      estimatedMonthlyRevenue: "N/A",
       description: "N/A",
       category: "N/A",
       images: [],
