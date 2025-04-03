@@ -1,8 +1,13 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
 import dotenv from "dotenv";
+import OpenAI from "openai";
 
 dotenv.config();
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 export async function scrapeEtsy(url) {
   const apiKey = process.env.SCRAPER_API_KEY;
@@ -74,7 +79,7 @@ export async function scrapeEtsy(url) {
         ? prices.reduce((sum, p) => sum + p, 0) / prices.length
         : null;
 
-    // Estimated Revenue
+    // Estimated Total Revenue
     const estimatedRevenue =
       avgPrice && reviews !== "N/A"
         ? `$${Math.round(parseInt(reviews) * avgPrice).toLocaleString()}`
@@ -115,18 +120,62 @@ export async function scrapeEtsy(url) {
       }
     }
 
+    // Estimate monthly sales (based on review count)
+    let estimatedMonthlySales = "N/A";
+    let estimatedMonthlyRevenue = "N/A";
+    if (
+      reviews !== "N/A" &&
+      shopCreationYear !== "N/A" &&
+      avgPrice !== null
+    ) {
+      const monthsActive =
+        new Date().getFullYear() * 12 +
+        new Date().getMonth() -
+        (parseInt(shopCreationYear) * 12 + 0);
+      const estimatedMonthly = Math.round(parseInt(reviews) / monthsActive);
+      estimatedMonthlySales = estimatedMonthly.toString();
+      estimatedMonthlyRevenue = `$${Math.round(estimatedMonthly * avgPrice).toLocaleString()}`;
+    }
+
+    // Inferred Tags using OpenAI
+    let inferredTags = [];
+    if (process.env.OPENAI_API_KEY) {
+      try {
+        const prompt = `Extract 13 high-ranking Etsy SEO tags (1–20 characters each) based on the following title and description. Return as a JSON array.
+
+Title: ${title}
+Description: ${description}`;
+
+        const completion = await openai.chat.completions.create({
+          model: "gpt-3.5-turbo",
+          messages: [{ role: "user", content: prompt }],
+        });
+
+        const responseText = completion.choices[0].message.content;
+        const extracted = JSON.parse(responseText);
+        if (Array.isArray(extracted)) {
+          inferredTags = extracted.slice(0, 13).map((tag) => tag.trim());
+        }
+      } catch (err) {
+        console.error("❌ Failed to generate inferred tags:", err.message);
+      }
+    }
+
     return {
       title,
       price: priceOptions.length > 0 ? priceOptions : "N/A",
       shopName,
       rating,
-      reviews,
+      listingReviews: reviews,
       estimatedRevenue,
+      estimatedMonthlySales,
+      estimatedMonthlyRevenue,
       description,
       category,
       images: [...new Set(images)],
       shopCreationYear,
       shopSales,
+      inferredTags,
     };
   } catch (err) {
     console.error("❌ Scraping error:", err.message);
@@ -135,13 +184,16 @@ export async function scrapeEtsy(url) {
       price: "N/A",
       shopName: "N/A",
       rating: "N/A",
-      reviews: "N/A",
+      listingReviews: "N/A",
       estimatedRevenue: "N/A",
+      estimatedMonthlySales: "N/A",
+      estimatedMonthlyRevenue: "N/A",
       description: "N/A",
       category: "N/A",
       images: [],
       shopCreationYear: "N/A",
       shopSales: "N/A",
+      inferredTags: [],
     };
   }
 }
