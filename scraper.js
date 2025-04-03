@@ -19,18 +19,22 @@ export async function scrapeEtsy(url) {
       $('h1').first().text().trim() ||
       "N/A";
 
-    // Price
-    let price = $('[data-buy-box-region="price"] [data-selector="price"]').text().trim();
-    if (!price) {
-      price = $('[data-buy-box-region="price"]').text().trim();
+    // Extract all variant prices from dropdown
+    let priceOptions = [];
+    $('select[id^="variation-selector"] option').each((_, el) => {
+      const text = $(el).text().trim();
+      if (text && /\$\d/.test(text)) {
+        priceOptions.push(text);
+      }
+    });
+
+    // If no dropdown prices, fallback to regular price block
+    if (priceOptions.length === 0) {
+      const fallbackPrice = $('[data-buy-box-region="price"]').text().trim();
+      if (fallbackPrice) priceOptions.push(fallbackPrice);
     }
-    if (!price) {
-      price = $('[class*="wt-text-title-03"]').first().text().trim();
-    }
-    if (!price) {
-      price = $("p.wt-text-title-03").first().text().trim();
-    }
-    if (!price) price = "N/A";
+
+    const price = priceOptions.length > 0 ? priceOptions : ["N/A"];
 
     // Shop Name
     let shopName = $('[data-region="shop-name"] a').text().trim();
@@ -48,17 +52,12 @@ export async function scrapeEtsy(url) {
       $('span[aria-label*="stars"]').attr("aria-label")?.split(" ")[0] ||
       "N/A";
 
-    // Review count
-    let reviews = $('span[data-review-count]').text().trim();
-    if (!reviews) {
-      reviews = $('[data-review-count]').text().trim();
-    }
-    if (!reviews) {
-      reviews = $('span:contains("reviews")').text().trim();
-    }
-    if (!reviews) {
-      reviews = $('span[class*="wt-badge"]').last().text().trim();
-    }
+    // Number of Reviews (Shop or Listing level)
+    let reviews =
+      $('span[data-review-count]').text().trim() ||
+      $('span:contains(" reviews")').first().text().trim() ||
+      $('a[href*="#reviews"]').text().trim();
+
     if (!reviews || reviews.toLowerCase().includes("custom")) {
       reviews = "N/A";
     }
@@ -68,7 +67,7 @@ export async function scrapeEtsy(url) {
     console.error("Scraping error:", error.message);
     return {
       title: "N/A",
-      price: "N/A",
+      price: ["N/A"],
       shopName: "N/A",
       rating: "N/A",
       reviews: "N/A",
