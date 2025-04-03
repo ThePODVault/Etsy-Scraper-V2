@@ -86,21 +86,25 @@ export async function scrapeEtsy(url) {
     }
 
     // Shop Creation Year from /about page
-    let shopCreationYear = "N/A";
-    if (shopName !== "N/A") {
-      const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
-      const aboutRes = await axios.get(proxy(aboutUrl));
-      const $$ = cheerio.load(aboutRes.data);
+let shopCreationYear = "N/A";
+if (shopName !== "N/A") {
+  try {
+    const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
+    const aboutRes = await axios.get(proxy(aboutUrl));
+    const $$ = cheerio.load(aboutRes.data);
 
-      $$("h4").each((_, el) => {
-        const heading = $$(el).text().trim();
-        if (heading.toLowerCase().includes("on etsy since")) {
-          const yearText = $$(el).next().text().trim();
-          const match = yearText.match(/\d{4}/);
-          if (match) shopCreationYear = match[0];
-        }
-      });
-    }
+    $$("h4").each((_, el) => {
+      const heading = $$(el).text().trim().toLowerCase();
+      if (heading.includes("on etsy since")) {
+        const nextText = $$(el).next().text().trim();
+        const yearMatch = nextText.match(/\d{4}/);
+        if (yearMatch) shopCreationYear = yearMatch[0];
+      }
+    });
+  } catch (err) {
+    console.error("Failed to fetch shop creation year:", err.message);
+  }
+}
 
     return {
       title,
