@@ -55,12 +55,42 @@ export async function scrapeEtsy(url) {
       }
     });
 
+    // Estimated Sales and Revenue
+    let estimatedSales = "N/A";
+    let estimatedRevenue = "N/A";
+    if (reviews !== "N/A") {
+      const match = priceOptions[0]?.match(/[\d,.]+/);
+      const basePrice = match ? parseFloat(match[0].replace(/,/g, "")) : null;
+      if (basePrice) {
+        estimatedSales = Math.round(parseInt(reviews) * 3);
+        estimatedRevenue = `$${(estimatedSales * basePrice).toFixed(2)}`;
+      }
+    }
+
+    // Inferred Tags
+    const description = $("div[data-id='description-text']").text().trim();
+    const tagText = (title + " " + description).toLowerCase().replace(/[^a-z0-9\s]/g, "");
+    const words = tagText.split(/\s+/);
+    const frequency = {};
+    words.forEach((word) => {
+      if (word.length > 3 && !["with", "this", "that", "your", "have", "from", "just", "make"].includes(word)) {
+        frequency[word] = (frequency[word] || 0) + 1;
+      }
+    });
+    const inferredTags = Object.entries(frequency)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([word]) => word);
+
     return {
       title,
       price: priceOptions.length > 0 ? priceOptions : "N/A",
       shopName,
       rating,
       reviews,
+      estimatedSales,
+      estimatedRevenue,
+      inferredTags,
     };
   } catch (error) {
     console.error("❌ Scraping error:", error.message);
@@ -70,6 +100,9 @@ export async function scrapeEtsy(url) {
       shopName: "N/A",
       rating: "N/A",
       reviews: "N/A",
+      estimatedSales: "N/A",
+      estimatedRevenue: "N/A",
+      inferredTags: [],
     };
   }
 }
