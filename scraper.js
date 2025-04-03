@@ -8,10 +8,12 @@ export async function scrapeEtsy(url) {
   const apiKey = process.env.SCRAPER_API_KEY;
   if (!apiKey) throw new Error("SCRAPER_API_KEY not set");
 
-  const proxyUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
+  const proxy = (targetUrl) =>
+    `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(targetUrl)}`;
 
   try {
-    const response = await axios.get(proxyUrl);
+    // Fetch listing page
+    const response = await axios.get(proxy(url));
     const $ = cheerio.load(response.data);
 
     // Title
@@ -36,26 +38,59 @@ export async function scrapeEtsy(url) {
       if (fallback) priceOptions.push(fallback);
     }
 
-    // JSON-LD metadata
+    // JSON-LD Metadata
     let shopName = "N/A";
     let reviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
       try {
         const json = JSON.parse($(el).html());
         if (json && json["@type"] === "Product") {
-          if (json?.brand?.name) {
-            shopName = json.brand.name;
-          }
+          if (json?.brand?.name) shopName = json.brand.name;
           if (json?.aggregateRating?.reviewCount) {
             reviews = json.aggregateRating.reviewCount.toString();
           }
         }
-      } catch (err) {
-        // continue
-      }
+      } catch {}
     });
 
-    // Estimate average price
+    // Description
+    let description = "N/A";
+    const descSelector = $("div[data-id='description-text'] p").text().trim();
+    if (descSelector) description = descSelector;
+
+    // Category (breadcrumb)
+    const category =
+      $("ul[aria-label='Breadcrumb'] li")
+        .last()
+        .find("a")
+        .text()
+        .trim() || "N/A";
+
+    // All image URLs
+    const images = [];
+    $("img").each((_, el) => {
+      const src = $(el).attr("src");
+      if (src && src.includes("etsystatic")) images.push(src);
+    });
+
+    // Extract shop link to scrape creation year
+    const shopUrl =
+      $("a[data-region='shop-name']").attr("href") ||
+      $("a[href*='/shop/']").attr("href");
+
+    // Shop creation year
+    let shopCreationYear = "N/A";
+    if (shopUrl) {
+      try {
+        const shopResponse = await axios.get(proxy(`https://www.etsy.com${shopUrl}`));
+        const $$ = cheerio.load(shopResponse.data);
+        const yearText = $$("div.wt-text-caption").text();
+        const match = yearText.match(/(\d{4})/);
+        if (match) shopCreationYear = match[1];
+      } catch {}
+    }
+
+    // Estimated Revenue
     let avgPrice = null;
     const prices = priceOptions
       .map((p) => {
@@ -68,51 +103,9 @@ export async function scrapeEtsy(url) {
       avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
     }
 
-    // Shop sales (try to get from UI)
-    let shopSales = "N/A";
-    const shopSalesText = $("div:contains('Sales')").text();
-    const shopSalesMatch = shopSalesText.match(/([\d,]+)\s+Sales/i);
-    if (shopSalesMatch) {
-      shopSales = shopSalesMatch[1].replace(/,/g, "");
-    }
-
-    // Estimated revenue
     let estimatedRevenue = "N/A";
-    if (avgPrice && shopSales !== "N/A") {
-      estimatedRevenue = `$${Math.round(parseInt(shopSales) * avgPrice).toLocaleString()}`;
-    }
-
-    // Description
-    let description = "N/A";
-    const descriptionMeta = $("meta[name='description']").attr("content");
-    if (descriptionMeta) description = descriptionMeta.trim();
-
-    // Category (breadcrumb)
-    let category = "N/A";
-    const breadcrumb = $("ul[aria-label='Breadcrumb'] li").last().text().trim();
-    if (breadcrumb) category = breadcrumb;
-
-    // All product images
-    const images = [];
-    $("img").each((_, el) => {
-      const src = $(el).attr("src");
-      if (src && src.includes("etsystatic")) {
-        images.push(src);
-      }
-    });
-
-    // Shop creation year (attempt from footer or About section)
-    let shopCreationYear = "N/A";
-    const footerText = $("footer").text();
-    const yearMatch = footerText.match(/©\s?(\d{4})\sEtsy/);
-    if (yearMatch) {
-      shopCreationYear = yearMatch[1];
-    } else {
-      const aboutText = $("div:contains('has been on Etsy since')").text();
-      const altYearMatch = aboutText.match(/since\s(\d{4})/i);
-      if (altYearMatch) {
-        shopCreationYear = altYearMatch[1];
-      }
+    if (avgPrice && reviews !== "N/A") {
+      estimatedRevenue = `$${Math.round(parseInt(reviews) * avgPrice).toLocaleString()}`;
     }
 
     return {
@@ -121,12 +114,11 @@ export async function scrapeEtsy(url) {
       shopName,
       rating,
       reviews,
-      shopSales,
       estimatedRevenue,
       description,
       category,
       images,
-      shopCreationYear
+      shopCreationYear,
     };
   } catch (error) {
     console.error("❌ Scraping error:", error.message);
@@ -136,12 +128,11 @@ export async function scrapeEtsy(url) {
       shopName: "N/A",
       rating: "N/A",
       reviews: "N/A",
-      shopSales: "N/A",
       estimatedRevenue: "N/A",
       description: "N/A",
       category: "N/A",
       images: [],
-      shopCreationYear: "N/A"
+      shopCreationYear: "N/A",
     };
   }
 }
