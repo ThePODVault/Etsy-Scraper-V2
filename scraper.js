@@ -86,7 +86,7 @@ export async function scrapeEtsy(url) {
       $("a[href*='/category/']").last().text().trim() ||
       "N/A";
 
-    // Shop creation year from /about
+        // Shop creation year from /about
     let shopCreationYear = "N/A";
     if (shopName !== "N/A") {
       try {
@@ -94,11 +94,11 @@ export async function scrapeEtsy(url) {
         const aboutRes = await axios.get(proxy(aboutUrl));
         const $$ = cheerio.load(aboutRes.data);
 
-        $$(".wt-text-body-01").each((_, el) => {
-          const text = $$(el).text().trim();
-          if (text.toLowerCase().includes("on etsy since")) {
-            const yearNode = $$(el).next();
-            const yearText = yearNode.text().trim();
+        // Find the label and then grab the next sibling's text
+        $$(".wt-text-caption").each((_, el) => {
+          const text = $$(el).text().trim().toLowerCase();
+          if (text.includes("on etsy since")) {
+            const yearText = $$(el).next().text().trim();
             const yearMatch = yearText.match(/\d{4}/);
             if (yearMatch) {
               shopCreationYear = yearMatch[0];
@@ -106,7 +106,7 @@ export async function scrapeEtsy(url) {
           }
         });
       } catch (err) {
-        console.error("❌ Shop creation fetch failed:", err.message);
+        console.error("❌ Failed to get shop creation year:", err.message);
       }
     }
 
