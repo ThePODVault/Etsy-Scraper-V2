@@ -12,8 +12,7 @@ export async function scrapeEtsy(url) {
 
   try {
     const response = await axios.get(proxyUrl);
-    const html = response.data;
-    const $ = cheerio.load(html);
+    const $ = cheerio.load(response.data);
 
     // Title
     const title = $("h1[data-buy-box-listing-title]").text().trim() || "N/A";
@@ -51,20 +50,13 @@ export async function scrapeEtsy(url) {
             reviews = json.aggregateRating.reviewCount.toString();
           }
         }
-      } catch {
-        // ignore
+      } catch (err) {
+        // continue
       }
     });
 
-    // 🛠️ Shop Sales via Regex fallback
-    let shopSales = "N/A";
-    const salesMatch = html.match(/([\d,]+)\s+sales/i);
-    if (salesMatch) {
-      shopSales = salesMatch[1].replace(/,/g, "");
-    }
-
-    // 💰 Estimate average price
-    let avgPrice = null;
+    // Estimate revenue
+    let estimatedRevenue = "N/A";
     const prices = priceOptions
       .map((p) => {
         const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
@@ -72,15 +64,31 @@ export async function scrapeEtsy(url) {
       })
       .filter((val) => val !== null);
 
-    if (prices.length) {
-      avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
+    const avgPrice = prices.length
+      ? prices.reduce((sum, p) => sum + p, 0) / prices.length
+      : null;
+
+    if (avgPrice && reviews !== "N/A") {
+      estimatedRevenue = `$${Math.round(parseInt(reviews) * avgPrice).toLocaleString()}`;
     }
 
-    // 📊 Estimated revenue
-    let estimatedRevenue = "N/A";
-    if (avgPrice && shopSales !== "N/A") {
-      estimatedRevenue = `$${Math.round(parseInt(shopSales) * avgPrice).toLocaleString()}`;
-    }
+    // Category (from breadcrumb)
+    const category = $("ul[aria-label='Breadcrumb'] li:last-child a").text().trim() || "N/A";
+
+    // Description
+    const description =
+      $("div[data-id='description-text']").text().trim() ||
+      $("div.wt-content-toggle--truncated-text").text().trim() ||
+      "N/A";
+
+    // All image URLs
+    const images = [];
+    $("img").each((_, el) => {
+      const src = $(el).attr("src");
+      if (src && src.includes("etsystatic.com") && !images.includes(src)) {
+        images.push(src);
+      }
+    });
 
     return {
       title,
@@ -88,8 +96,10 @@ export async function scrapeEtsy(url) {
       shopName,
       rating,
       reviews,
-      shopSales,
       estimatedRevenue,
+      category,
+      description,
+      images,
     };
   } catch (error) {
     console.error("❌ Scraping error:", error.message);
@@ -99,8 +109,10 @@ export async function scrapeEtsy(url) {
       shopName: "N/A",
       rating: "N/A",
       reviews: "N/A",
-      shopSales: "N/A",
       estimatedRevenue: "N/A",
+      category: "N/A",
+      description: "N/A",
+      images: [],
     };
   }
 }
