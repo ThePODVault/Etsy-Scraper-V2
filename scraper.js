@@ -15,14 +15,14 @@ export async function scrapeEtsy(url) {
   // ✅ Title
   const title = $("h1[data-buy-box-listing-title]").text().trim() || "N/A";
 
-  // ✅ Price Variants (Filter out colors, keep sizes/prices only)
+  // ✅ Price Variants
   const priceOptions = [];
   $("[data-selector='listing-page-variations'] select option").each((_, el) => {
     const text = $(el).text().trim();
     if (
       text &&
       !text.toLowerCase().includes("select") &&
-      /\$\d/.test(text)
+      /\$\d|\€\d|\£\d/.test(text)
     ) {
       priceOptions.push(text);
     }
@@ -37,17 +37,21 @@ export async function scrapeEtsy(url) {
   const shopName =
     $("[data-region='shop-name']").first().text().trim() ||
     $("div.wt-text-body-01.wt-line-height-tight.wt-break-word").first().text().trim() ||
-    $("p:contains('Shop policies')").prev("p").text().trim() ||
     "N/A";
 
   // ✅ Rating
   const rating = $("input[name='rating']").attr("value") || "N/A";
 
-  // ✅ Number of Reviews
+  // ✅ Reviews (Numeric count only)
   let reviews = "N/A";
-  const reviewText = $("span[data-review-count]").text().trim();
-  const reviewMatch = reviewText.match(/\d[\d,]*/);
-  if (reviewMatch) reviews = reviewMatch[0].replace(/,/g, "");
+  const metaReviewText = $("meta[itemprop='reviewCount']").attr("content");
+  if (metaReviewText) {
+    reviews = metaReviewText;
+  } else {
+    const fallbackText = $("span[data-review-count]").text().trim();
+    const match = fallbackText.match(/\d[\d,]*/);
+    if (match) reviews = match[0].replace(/,/g, "");
+  }
 
   // ✅ Main Image
   const image =
@@ -80,9 +84,10 @@ export async function scrapeEtsy(url) {
     price,
     shopName,
     rating,
-    reviews, // <-- Now shows just the number like "3418"
+    reviews,
     image,
     categories: categories.length ? categories : "N/A",
     tags: tags.length ? tags : "N/A",
   };
 }
+
