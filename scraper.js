@@ -55,8 +55,8 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // Estimate revenue
-    let estimatedRevenue = "N/A";
+    // Estimate average price
+    let avgPrice = null;
     const prices = priceOptions
       .map((p) => {
         const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
@@ -64,31 +64,56 @@ export async function scrapeEtsy(url) {
       })
       .filter((val) => val !== null);
 
-    const avgPrice = prices.length
-      ? prices.reduce((sum, p) => sum + p, 0) / prices.length
-      : null;
-
-    if (avgPrice && reviews !== "N/A") {
-      estimatedRevenue = `$${Math.round(parseInt(reviews) * avgPrice).toLocaleString()}`;
+    if (prices.length) {
+      avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
     }
 
-    // Category (from breadcrumb)
-    const category = $("ul[aria-label='Breadcrumb'] li:last-child a").text().trim() || "N/A";
+    // Shop sales (try to get from UI)
+    let shopSales = "N/A";
+    const shopSalesText = $("div:contains('Sales')").text();
+    const shopSalesMatch = shopSalesText.match(/([\d,]+)\s+Sales/i);
+    if (shopSalesMatch) {
+      shopSales = shopSalesMatch[1].replace(/,/g, "");
+    }
+
+    // Estimated revenue
+    let estimatedRevenue = "N/A";
+    if (avgPrice && shopSales !== "N/A") {
+      estimatedRevenue = `$${Math.round(parseInt(shopSales) * avgPrice).toLocaleString()}`;
+    }
 
     // Description
-    const description =
-      $("div[data-id='description-text']").text().trim() ||
-      $("div.wt-content-toggle--truncated-text").text().trim() ||
-      "N/A";
+    let description = "N/A";
+    const descriptionMeta = $("meta[name='description']").attr("content");
+    if (descriptionMeta) description = descriptionMeta.trim();
 
-    // All image URLs
+    // Category (breadcrumb)
+    let category = "N/A";
+    const breadcrumb = $("ul[aria-label='Breadcrumb'] li").last().text().trim();
+    if (breadcrumb) category = breadcrumb;
+
+    // All product images
     const images = [];
     $("img").each((_, el) => {
       const src = $(el).attr("src");
-      if (src && src.includes("etsystatic.com") && !images.includes(src)) {
+      if (src && src.includes("etsystatic")) {
         images.push(src);
       }
     });
+
+    // Shop creation year (attempt from footer or About section)
+    let shopCreationYear = "N/A";
+    const footerText = $("footer").text();
+    const yearMatch = footerText.match(/©\s?(\d{4})\sEtsy/);
+    if (yearMatch) {
+      shopCreationYear = yearMatch[1];
+    } else {
+      const aboutText = $("div:contains('has been on Etsy since')").text();
+      const altYearMatch = aboutText.match(/since\s(\d{4})/i);
+      if (altYearMatch) {
+        shopCreationYear = altYearMatch[1];
+      }
+    }
 
     return {
       title,
@@ -96,10 +121,12 @@ export async function scrapeEtsy(url) {
       shopName,
       rating,
       reviews,
+      shopSales,
       estimatedRevenue,
-      category,
       description,
+      category,
       images,
+      shopCreationYear
     };
   } catch (error) {
     console.error("❌ Scraping error:", error.message);
@@ -109,10 +136,12 @@ export async function scrapeEtsy(url) {
       shopName: "N/A",
       rating: "N/A",
       reviews: "N/A",
+      shopSales: "N/A",
       estimatedRevenue: "N/A",
-      category: "N/A",
       description: "N/A",
+      category: "N/A",
       images: [],
+      shopCreationYear: "N/A"
     };
   }
 }
