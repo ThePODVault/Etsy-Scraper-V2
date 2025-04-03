@@ -56,12 +56,25 @@ export async function scrapeEtsy(url) {
     });
 
     // 🟨 Listing-specific reviews (from main section above star rating)
-    let listingReviews = "N/A";
-    const listingReviewSelector = $("span.wt-text-body-03.wt-nudge-b-2.wt-text-gray").first().text().trim();
-    const listingReviewMatch = listingReviewSelector.match(/\d[\d,]*/);
-    if (listingReviewMatch) {
-      listingReviews = listingReviewMatch[0].replace(/,/g, "");
+let listingReviews = "N/A";
+
+// Strategy 1: Exact selector
+let rawText = $("span.wt-text-body-03.wt-nudge-b-2.wt-text-gray").first().text().trim();
+let match = rawText.match(/\d[\d,]*/);
+if (!match) {
+  // Strategy 2: Caption text containing "review"
+  $("span.wt-text-caption").each((_, el) => {
+    const text = $(el).text().toLowerCase();
+    if (text.includes("review") && /\d/.test(text)) {
+      const found = text.match(/\d[\d,]*/);
+      if (found) match = found;
     }
+  });
+}
+
+if (match) {
+  listingReviews = match[0].replace(/,/g, "");
+}
 
     // ✅ Estimated Revenue
     let estimatedRevenue = "N/A";
