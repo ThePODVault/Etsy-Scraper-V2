@@ -12,7 +12,8 @@ export async function scrapeEtsy(url) {
 
   try {
     const response = await axios.get(proxyUrl);
-    const $ = cheerio.load(response.data);
+    const html = response.data;
+    const $ = cheerio.load(html);
 
     // Title
     const title = $("h1[data-buy-box-listing-title]").text().trim() || "N/A";
@@ -51,23 +52,18 @@ export async function scrapeEtsy(url) {
           }
         }
       } catch {
-        // Ignore bad JSON blocks
+        // ignore
       }
     });
 
-    // Shop sales — scan for elements that mention "sales" nearby shop section
+    // 🛠️ Shop Sales via Regex fallback
     let shopSales = "N/A";
-    $("div.wt-text-caption").each((_, el) => {
-      const text = $(el).text().trim();
-      if (/sales/i.test(text)) {
-        const match = text.match(/(\d[\d,]*)\s+sales/i);
-        if (match) {
-          shopSales = match[1].replace(/,/g, "");
-        }
-      }
-    });
+    const salesMatch = html.match(/([\d,]+)\s+sales/i);
+    if (salesMatch) {
+      shopSales = salesMatch[1].replace(/,/g, "");
+    }
 
-    // Estimate average price
+    // 💰 Estimate average price
     let avgPrice = null;
     const prices = priceOptions
       .map((p) => {
@@ -80,7 +76,7 @@ export async function scrapeEtsy(url) {
       avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
     }
 
-    // Estimated revenue
+    // 📊 Estimated revenue
     let estimatedRevenue = "N/A";
     if (avgPrice && shopSales !== "N/A") {
       estimatedRevenue = `$${Math.round(parseInt(shopSales) * avgPrice).toLocaleString()}`;
