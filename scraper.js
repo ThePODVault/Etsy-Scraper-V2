@@ -13,28 +13,26 @@ export async function scrapeEtsy(url) {
   const $ = cheerio.load(response.data);
 
   const title = $("h1[data-buy-box-listing-title]").text().trim() || "N/A";
-  const shopName = $("[data-buy-box-region=seller-name]").text().trim() || "N/A";
-  const rating = $("input[name=rating]").attr("value") || "N/A";
+  const shopName = $("[data-buy-box-region='seller-name']").text().trim() || "N/A";
+  const rating = $("input[name='rating']").attr("value") || "N/A";
   const reviews = $("span[data-review-count]").text().replace(/\D/g, "") || "N/A";
 
   const priceOptions = [];
-  $("[data-selector=select-option-title-price]").each((_, el) => {
+  $("[data-selector='select-option-title-price']").each((_, el) => {
     const text = $(el).text().trim();
     if (text) priceOptions.push(text);
   });
 
-  const description = $("div[data-id='description-text']").text().trim() || "N/A";
-
   const image = $("img[data-index='0']").attr("src") || $("img").first().attr("src") || "N/A";
 
   const categories = [];
-  $("ul[data-selector='breadcrumb-list'] li").each((_, el) => {
+  $("nav[aria-label='Breadcrumb'] li a").each((_, el) => {
     const category = $(el).text().trim();
     if (category) categories.push(category);
   });
 
   const tags = [];
-  $("a[href*='/search?q=']").each((_, el) => {
+  $("div[data-selector='tags'] a").each((_, el) => {
     const tag = $(el).text().trim();
     if (tag && !tags.includes(tag)) tags.push(tag);
   });
@@ -45,9 +43,9 @@ export async function scrapeEtsy(url) {
     shopName,
     rating,
     reviews,
-    description,
     image,
     categories: categories.length > 0 ? categories : "N/A",
     tags: tags.length > 0 ? tags : "N/A",
   };
 }
+
