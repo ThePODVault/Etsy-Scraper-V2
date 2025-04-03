@@ -55,7 +55,7 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // Listing-specific reviews (extracted from UI)
+    // Listing-specific reviews (from UI)
     let listingReviews = "N/A";
     const listingReviewText = $("span[data-review-count]").text().trim();
     const reviewMatch = listingReviewText.match(/\d[\d,]*/);
@@ -63,7 +63,7 @@ export async function scrapeEtsy(url) {
       listingReviews = reviewMatch[0].replace(/,/g, "");
     }
 
-    // Estimate average price
+    // Average price calculation
     let avgPrice = null;
     const prices = priceOptions
       .map((p) => {
