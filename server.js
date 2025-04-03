@@ -5,7 +5,7 @@ import * as cheerio from "cheerio";
 const app = express();
 app.use(express.json());
 
-const SCRAPER_API_KEY = "YOUR_SCRAPERAPI_KEY_HERE"; // Replace with your actual ScraperAPI key
+const SCRAPER_API_KEY = "8b6407774a0552c357c86a458d6b7169"; // Replace with your actual ScraperAPI key
 
 app.post("/scrape", async (req, res) => {
   const { url } = req.body;
