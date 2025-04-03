@@ -55,14 +55,15 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // 🟨 Listing-specific reviews (from main section above star rating)
+    // 🟨 Listing-specific reviews (fallbacks included)
 let listingReviews = "N/A";
 
-// Strategy 1: Exact selector
-let rawText = $("span.wt-text-body-03.wt-nudge-b-2.wt-text-gray").first().text().trim();
-let match = rawText.match(/\d[\d,]*/);
+// Try 1: Standard Etsy selector
+let reviewBlock = $("span.wt-text-body-03.wt-nudge-b-2.wt-text-gray").first().text().trim();
+let match = reviewBlock.match(/\d[\d,]*/);
+
+// Try 2: Any nearby caption that mentions "review"
 if (!match) {
-  // Strategy 2: Caption text containing "review"
   $("span.wt-text-caption").each((_, el) => {
     const text = $(el).text().toLowerCase();
     if (text.includes("review") && /\d/.test(text)) {
@@ -70,6 +71,27 @@ if (!match) {
       if (found) match = found;
     }
   });
+}
+
+if (match) {
+  listingReviews = match[0].replace(/,/g, "");
+}
+
+// 🧮 Estimate revenue from average price × listing reviews
+let estimatedRevenue = "N/A";
+
+if (listingReviews !== "N/A" && Array.isArray(priceOptions) && priceOptions.length > 0) {
+  const prices = priceOptions
+    .map((text) => {
+      const match = text.match(/[\$€£](\d+(\.\d+)?)/);
+      return match ? parseFloat(match[1]) : null;
+    })
+    .filter((num) => num !== null);
+
+  if (prices.length > 0) {
+    const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+    estimatedRevenue = (avgPrice * parseInt(listingReviews)).toFixed(2);
+  }
 }
 
 if (match) {
