@@ -14,30 +14,13 @@ export async function scrapeEtsy(url) {
     const response = await axios.get(proxyUrl);
     const $ = cheerio.load(response.data);
 
-    // 🏷️ Title
+    // Title
     const title = $("h1[data-buy-box-listing-title]").text().trim() || "N/A";
 
-    // 🛍️ Shop Name - Try multiple selectors
-    const shopName =
-      $("div[data-region='shop-name'] a").first().text().trim() ||
-      $("a[data-shop-name]").text().trim() ||
-      $("div[data-selector='shop-name'] span").first().text().trim() ||
-      "N/A";
-
-    // ⭐ Rating
+    // Rating
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
-    // 🧮 Reviews (number only, cleaned)
-    let reviews =
-      $("span[data-review-count]").text().trim() ||
-      $("a[data-review-count-link]").text().trim() ||
-      $("span[class*='wt-text-body-03']").filter((_, el) =>
-        $(el).text().includes("reviews")
-      ).text().trim() || "N/A";
-
-    reviews = reviews.replace(/[^\d]/g, "") || "N/A";
-
-    // 💰 Prices
+    // Prices (dropdown options)
     const priceOptions = [];
     $("select#inventory-variation-select-0 option").each((_, el) => {
       const text = $(el).text().trim();
@@ -46,12 +29,31 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // Fallback static price
+    // Fallback price
     if (priceOptions.length === 0) {
       let fallback = $("[data-buy-box-region='price']").text().trim();
       fallback = fallback.replace(/\s+/g, " ").replace(/Loading/i, "").trim();
       if (fallback) priceOptions.push(fallback);
     }
+
+    // 📦 Attempt to parse JSON-LD metadata for shop name & reviews
+    let shopName = "N/A";
+    let reviews = "N/A";
+    $("script[type='application/ld+json']").each((_, el) => {
+      try {
+        const json = JSON.parse($(el).html());
+        if (json && json["@type"] === "Product") {
+          if (json?.brand?.name) {
+            shopName = json.brand.name;
+          }
+          if (json?.aggregateRating?.reviewCount) {
+            reviews = json.aggregateRating.reviewCount.toString();
+          }
+        }
+      } catch (err) {
+        // Skip if JSON parse fails
+      }
+    });
 
     return {
       title,
