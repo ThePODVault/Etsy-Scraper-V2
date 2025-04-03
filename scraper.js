@@ -75,7 +75,7 @@ export async function scrapeEtsy(url) {
       $("a[href*='/category/']").last().text().trim() ||
       "N/A";
 
-    // 🆕 Extract from about page
+    // 🆕 Shop About Info
     let shopCreationYear = "N/A";
     let shopSales = "N/A";
 
@@ -85,21 +85,20 @@ export async function scrapeEtsy(url) {
         const aboutRes = await axios.get(proxy(aboutUrl));
         const $$ = cheerio.load(aboutRes.data);
 
-        // Loop through all about-stat blocks
-        $$(".wt-display-flex-xs.wt-align-items-center.wt-flex-direction-column-xs").each((_, el) => {
-          const label = $$(el).find(".wt-text-caption").text().trim().toLowerCase();
-          const value = $$(el).find(".wt-text-title-01").text().trim();
+        $$(".wt-text-center.wt-text-caption").each((_, el) => {
+          const label = $$(el).text().trim().toLowerCase();
+          const statValue = $$(el).prev().text().trim();
 
-          if (label.includes("on etsy since") && /\d{4}/.test(value)) {
-            shopCreationYear = value.match(/\d{4}/)[0];
+          if (label.includes("on etsy since") && /\d{4}/.test(statValue)) {
+            shopCreationYear = statValue.match(/\d{4}/)[0];
           }
 
-          if (label.includes("sales") && /^\d/.test(value)) {
-            shopSales = value.replace(/,/g, "");
+          if (label === "sales" && /^\d/.test(statValue)) {
+            shopSales = statValue.replace(/,/g, "");
           }
         });
       } catch (err) {
-        console.error("❌ Failed to extract about page info:", err.message);
+        console.error("❌ About page error:", err.message);
       }
     }
 
