@@ -8,8 +8,8 @@ export async function scrapeEtsy(url) {
   const apiKey = process.env.SCRAPER_API_KEY;
   if (!apiKey) throw new Error("SCRAPER_API_KEY not set");
 
-  const proxy = (targetUrl) =>
-    `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(targetUrl)}`;
+  const proxy = (url) =>
+    `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
 
   try {
     const response = await axios.get(proxy(url));
@@ -89,36 +89,29 @@ export async function scrapeEtsy(url) {
     // Shop Creation Year + Sales
     let shopCreationYear = "N/A";
     let shopSales = "N/A";
+
     if (shopName !== "N/A") {
       try {
         const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
         const aboutRes = await axios.get(proxy(aboutUrl));
         const $$ = cheerio.load(aboutRes.data);
-
-        $$(".wt-text-caption").each((_, el) => {
-          const text = $$(el).text().toLowerCase();
-
-          if (text.includes("on etsy since")) {
-            const year = $$(el).next().text().trim().match(/\d{4}/);
-            if (year) shopCreationYear = year[0];
-          }
-
-          if (text.includes("sales")) {
-            const sales = text.match(/[\d,]+/);
-            if (sales) shopSales = sales[0].replace(",", "");
-          }
-        });
-
-        // Additional fallback: look for plain text
         const bodyText = $$.text();
-        const yearMatch = bodyText.match(/opened in (\d{4})/i);
-        if (yearMatch) shopCreationYear = yearMatch[1];
 
+        // Extract creation year
+        const yearMatch =
+          bodyText.match(/opened in (\d{4})/i) ||
+          bodyText.match(/on etsy since (\d{4})/i);
+        if (yearMatch) {
+          shopCreationYear = yearMatch[1];
+        }
+
+        // Extract total sales
         const salesMatch = bodyText.match(/([\d,]+)\s+sales/i);
-        if (salesMatch) shopSales = salesMatch[1].replace(/,/g, "");
-
+        if (salesMatch) {
+          shopSales = salesMatch[1].replace(/,/g, "");
+        }
       } catch (err) {
-        console.error("❌ Failed to get shop about info:", err.message);
+        console.error("❌ Failed to scrape about page:", err.message);
       }
     }
 
