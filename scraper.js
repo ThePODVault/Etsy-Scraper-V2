@@ -56,12 +56,16 @@ export async function scrapeEtsy(url) {
     });
 
     // Shop Sales
-    let shopSales = "N/A";
-    const salesText = $("div:contains('Sales')").first().text().trim();
-    const salesMatch = salesText.match(/[\d,]+(?=\s+Sales)/i);
-    if (salesMatch) {
-      shopSales = salesMatch[0].replace(/,/g, "");
-    }
+let shopSales = "N/A";
+const salesSelector = $("span:contains('Sales'), div:contains('Sales')");
+salesSelector.each((_, el) => {
+  const text = $(el).text();
+  const match = text.match(/([\d,]+)\s+Sales/i);
+  if (match) {
+    shopSales = match[1].replace(/,/g, "");
+    return false; // break loop
+  }
+});
 
     // Estimate average price
     let avgPrice = null;
