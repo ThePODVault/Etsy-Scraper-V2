@@ -15,27 +15,21 @@ export async function scrapeEtsy(url) {
     const response = await axios.get(proxy(url));
     const $ = cheerio.load(response.data);
 
-    // Title
     const title = $("h1[data-buy-box-listing-title]").text().trim() || "N/A";
-
-    // Rating
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
-    // Price Options
     const priceOptions = [];
     $("select option").each((_, el) => {
       const text = $(el).text().trim();
       if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
     });
 
-    // Fallback price
     if (priceOptions.length === 0) {
       let fallback = $("[data-buy-box-region='price']").text().trim();
       fallback = fallback.replace(/\s+/g, " ").replace(/Loading/i, "").trim();
       if (fallback) priceOptions.push(fallback);
     }
 
-    // JSON-LD metadata
     let shopName = "N/A";
     let reviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
@@ -49,11 +43,9 @@ export async function scrapeEtsy(url) {
       } catch (err) {}
     });
 
-    // Description
     const rawDesc = $("[data-id='description-text']").text().trim();
     const description = rawDesc || "N/A";
 
-    // Images
     const images = [];
     $("img").each((_, el) => {
       const src = $(el).attr("src") || $(el).attr("data-src");
@@ -62,7 +54,6 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // Estimate average price
     const prices = priceOptions
       .map((p) => {
         const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
@@ -74,43 +65,41 @@ export async function scrapeEtsy(url) {
         ? prices.reduce((sum, p) => sum + p, 0) / prices.length
         : null;
 
-    // Estimated Revenue
     const estimatedRevenue =
       avgPrice && reviews !== "N/A"
         ? `$${Math.round(parseInt(reviews) * avgPrice).toLocaleString()}`
         : "N/A";
 
-    // Category
     const category =
       $("a[href*='/c/']").last().text().trim() ||
       $("a[href*='/category/']").last().text().trim() ||
       "N/A";
 
-    // Shop creation year & total sales from /about page
+    // 🆕 Extract from about page
     let shopCreationYear = "N/A";
     let shopSales = "N/A";
+
     if (shopName !== "N/A") {
       try {
         const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
         const aboutRes = await axios.get(proxy(aboutUrl));
         const $$ = cheerio.load(aboutRes.data);
 
-        $$(".wt-text-caption").each((_, el) => {
-          const label = $$(el).text().trim().toLowerCase();
+        // Loop through all about-stat blocks
+        $$(".wt-display-flex-xs.wt-align-items-center.wt-flex-direction-column-xs").each((_, el) => {
+          const label = $$(el).find(".wt-text-caption").text().trim().toLowerCase();
+          const value = $$(el).find(".wt-text-title-01").text().trim();
 
-          if (label.includes("on etsy since")) {
-            const yearText = $$(el).next().text().trim();
-            const yearMatch = yearText.match(/\d{4}/);
-            if (yearMatch) shopCreationYear = yearMatch[0];
+          if (label.includes("on etsy since") && /\d{4}/.test(value)) {
+            shopCreationYear = value.match(/\d{4}/)[0];
           }
 
-          if (label.includes("sales")) {
-            const salesText = $$(el).next().text().trim().replace(/,/g, "");
-            if (/^\d+$/.test(salesText)) shopSales = salesText;
+          if (label.includes("sales") && /^\d/.test(value)) {
+            shopSales = value.replace(/,/g, "");
           }
         });
       } catch (err) {
-        console.error("❌ Failed to get shop creation data:", err.message);
+        console.error("❌ Failed to extract about page info:", err.message);
       }
     }
 
