@@ -28,7 +28,7 @@ export async function scrapeEtsy(url) {
       if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
     });
 
-    // Fallback price if variants not found
+    // Fallback price
     if (priceOptions.length === 0) {
       let fallback = $("[data-buy-box-region='price']").text().trim();
       fallback = fallback.replace(/\s+/g, " ").replace(/Loading/i, "").trim();
@@ -86,21 +86,31 @@ export async function scrapeEtsy(url) {
       $("a[href*='/category/']").last().text().trim() ||
       "N/A";
 
-    // Shop Creation Year
+    // Shop creation year & total sales from /about page
     let shopCreationYear = "N/A";
+    let shopSales = "N/A";
     if (shopName !== "N/A") {
       try {
         const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
         const aboutRes = await axios.get(proxy(aboutUrl));
         const $$ = cheerio.load(aboutRes.data);
 
-        const allText = $$.text();
-        const match = allText.match(/on etsy since\s+(\d{4})/i);
-        if (match) {
-          shopCreationYear = match[1];
-        }
+        $$(".wt-text-caption").each((_, el) => {
+          const label = $$(el).text().trim().toLowerCase();
+
+          if (label.includes("on etsy since")) {
+            const yearText = $$(el).next().text().trim();
+            const yearMatch = yearText.match(/\d{4}/);
+            if (yearMatch) shopCreationYear = yearMatch[0];
+          }
+
+          if (label.includes("sales")) {
+            const salesText = $$(el).next().text().trim().replace(/,/g, "");
+            if (/^\d+$/.test(salesText)) shopSales = salesText;
+          }
+        });
       } catch (err) {
-        console.error("❌ Failed to get shop creation year:", err.message);
+        console.error("❌ Failed to get shop creation data:", err.message);
       }
     }
 
@@ -115,6 +125,7 @@ export async function scrapeEtsy(url) {
       category,
       images: [...new Set(images)],
       shopCreationYear,
+      shopSales,
     };
   } catch (err) {
     console.error("❌ Scraping error:", err.message);
@@ -129,7 +140,7 @@ export async function scrapeEtsy(url) {
       category: "N/A",
       images: [],
       shopCreationYear: "N/A",
+      shopSales: "N/A",
     };
   }
 }
-
