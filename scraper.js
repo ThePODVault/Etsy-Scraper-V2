@@ -36,7 +36,7 @@ export async function scrapeEtsy(url) {
       if (fallback) priceOptions.push(fallback);
     }
 
-    // JSON-LD metadata for shop name and total reviews
+    // JSON-LD metadata for shopName and total reviews
     let shopName = "N/A";
     let reviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
@@ -55,45 +55,35 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // New: Listing-specific reviews and revenue
+    // Listing-specific reviews
     let listingReviews = "N/A";
-    let estimatedRevenue = "N/A";
-
     try {
-      // Try to find number of listing-specific reviews
-      let reviewBlock = $("span.wt-text-body-03.wt-nudge-b-2.wt-text-gray").first().text().trim();
-      let match = reviewBlock.match(/\d[\d,]*/);
-
-      if (!match) {
-        $("span.wt-text-caption").each((_, el) => {
-          const text = $(el).text().toLowerCase();
-          if (text.includes("review") && /\d/.test(text)) {
-            const found = text.match(/\d[\d,]*/);
-            if (found) match = found;
-          }
-        });
-      }
-
-      if (match) {
-        listingReviews = match[0].replace(/,/g, "");
-      }
-
-      // Estimate revenue
-      if (listingReviews !== "N/A" && Array.isArray(priceOptions) && priceOptions.length > 0) {
-        const prices = priceOptions
-          .map((text) => {
-            const match = text.match(/[\$€£](\d+(\.\d+)?)/);
-            return match ? parseFloat(match[1]) : null;
-          })
-          .filter((num) => num !== null);
-
-        if (prices.length > 0) {
-          const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
-          estimatedRevenue = (avgPrice * parseInt(listingReviews)).toFixed(2);
+      $("span").each((_, el) => {
+        const text = $(el).text().trim().toLowerCase();
+        const match = text.match(/^(\d[\d,]*)\s+reviews$/);
+        if (match) {
+          listingReviews = match[1].replace(/,/g, "");
+          return false; // break loop once found
         }
-      }
+      });
     } catch (err) {
-      console.warn("⚠️ Failed to calculate listing reviews or revenue:", err.message);
+      console.warn("⚠️ Failed to extract listing-specific reviews:", err.message);
+    }
+
+    // Estimated Revenue (based on avg price and listingReviews)
+    let estimatedRevenue = "N/A";
+    if (listingReviews !== "N/A" && Array.isArray(priceOptions) && priceOptions.length > 0) {
+      const prices = priceOptions
+        .map((text) => {
+          const match = text.match(/[\$€£](\d+(\.\d+)?)/);
+          return match ? parseFloat(match[1]) : null;
+        })
+        .filter((num) => num !== null);
+
+      if (prices.length > 0) {
+        const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+        estimatedRevenue = (avgPrice * parseInt(listingReviews)).toFixed(2);
+      }
     }
 
     return {
