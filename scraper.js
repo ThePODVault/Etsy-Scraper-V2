@@ -28,7 +28,7 @@ export async function scrapeEtsy(url) {
       if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
     });
 
-    // Fallback price
+    // Fallback price if variants not found
     if (priceOptions.length === 0) {
       let fallback = $("[data-buy-box-region='price']").text().trim();
       fallback = fallback.replace(/\s+/g, " ").replace(/Loading/i, "").trim();
@@ -86,7 +86,7 @@ export async function scrapeEtsy(url) {
       $("a[href*='/category/']").last().text().trim() ||
       "N/A";
 
-        // Shop creation year from /about
+    // Shop Creation Year
     let shopCreationYear = "N/A";
     if (shopName !== "N/A") {
       try {
@@ -94,17 +94,11 @@ export async function scrapeEtsy(url) {
         const aboutRes = await axios.get(proxy(aboutUrl));
         const $$ = cheerio.load(aboutRes.data);
 
-        // Find the label and then grab the next sibling's text
-        $$(".wt-text-caption").each((_, el) => {
-          const text = $$(el).text().trim().toLowerCase();
-          if (text.includes("on etsy since")) {
-            const yearText = $$(el).next().text().trim();
-            const yearMatch = yearText.match(/\d{4}/);
-            if (yearMatch) {
-              shopCreationYear = yearMatch[0];
-            }
-          }
-        });
+        const allText = $$.text();
+        const match = allText.match(/on etsy since\s+(\d{4})/i);
+        if (match) {
+          shopCreationYear = match[1];
+        }
       } catch (err) {
         console.error("❌ Failed to get shop creation year:", err.message);
       }
@@ -138,3 +132,4 @@ export async function scrapeEtsy(url) {
     };
   }
 }
+
