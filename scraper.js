@@ -14,36 +14,43 @@ export async function scrapeEtsy(url) {
     const response = await axios.get(proxyUrl);
     const $ = cheerio.load(response.data);
 
-    // Title
+    // 🏷️ Title
     const title = $("h1[data-buy-box-listing-title]").text().trim() || "N/A";
 
-    // Shop Name (3 fallback selectors)
+    // 🛍️ Shop Name - Try multiple selectors
     const shopName =
-      $("[data-region='shop-name'] a").first().text().trim() ||
+      $("div[data-region='shop-name'] a").first().text().trim() ||
       $("a[data-shop-name]").text().trim() ||
-      $("div[data-selector='shop-name'] span").text().trim() ||
+      $("div[data-selector='shop-name'] span").first().text().trim() ||
       "N/A";
 
-    // Rating
+    // ⭐ Rating
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
-    // Review count (cleaned to number only)
-    let reviews = $("span[data-review-count]").text().trim() || "N/A";
+    // 🧮 Reviews (number only, cleaned)
+    let reviews =
+      $("span[data-review-count]").text().trim() ||
+      $("a[data-review-count-link]").text().trim() ||
+      $("span[class*='wt-text-body-03']").filter((_, el) =>
+        $(el).text().includes("reviews")
+      ).text().trim() || "N/A";
+
     reviews = reviews.replace(/[^\d]/g, "") || "N/A";
 
-    // Price (dropdown or static)
+    // 💰 Prices
     const priceOptions = [];
-    $("select#inventory-variation-select-0 option").each((i, el) => {
+    $("select#inventory-variation-select-0 option").each((_, el) => {
       const text = $(el).text().trim();
-      if (text && /\$\d/.test(text)) {
+      if (text && /\$\d|\£\d/.test(text)) {
         priceOptions.push(text);
       }
     });
 
-    // Static fallback price if dropdown isn't available
+    // Fallback static price
     if (priceOptions.length === 0) {
-      const staticPrice = $("[data-buy-box-region='price']").text().trim();
-      if (staticPrice) priceOptions.push(staticPrice);
+      let fallback = $("[data-buy-box-region='price']").text().trim();
+      fallback = fallback.replace(/\s+/g, " ").replace(/Loading/i, "").trim();
+      if (fallback) priceOptions.push(fallback);
     }
 
     return {
