@@ -1,8 +1,9 @@
 {
   "name": "etsy-scraper",
   "version": "1.0.0",
-  "type": "module",
+  "description": "A web scraper for Etsy listings with AI-generated tags",
   "main": "server.js",
+  "type": "module",
   "scripts": {
     "start": "node server.js"
   },
@@ -10,6 +11,7 @@
     "axios": "^1.6.7",
     "cheerio": "^1.0.0-rc.12",
     "dotenv": "^16.3.1",
-    "express": "^4.18.2"
+    "express": "^4.18.3",
+    "openai": "^4.20.0"
   }
 }
