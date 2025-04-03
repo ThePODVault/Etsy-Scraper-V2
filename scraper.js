@@ -51,18 +51,19 @@ export async function scrapeEtsy(url) {
           }
         }
       } catch (err) {
-        // ignore
+        // skip malformed JSON
       }
     });
 
-    // ✅ Listing-specific reviews
-    let listingReviews = "N/A";
-    const reviewCountEl = $("[data-review-id]").length;
-    if (reviewCountEl > 0) {
-      listingReviews = reviewCountEl.toString();
+    // Shop Sales
+    let shopSales = "N/A";
+    const salesText = $("div:contains('Sales')").first().text().trim();
+    const salesMatch = salesText.match(/[\d,]+(?=\s+Sales)/i);
+    if (salesMatch) {
+      shopSales = salesMatch[0].replace(/,/g, "");
     }
 
-    // ✅ Estimate average price
+    // Estimate average price
     let avgPrice = null;
     const prices = priceOptions
       .map((p) => {
@@ -75,35 +76,10 @@ export async function scrapeEtsy(url) {
       avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
     }
 
-    // ✅ Estimated revenue
+    // Estimated store revenue
     let estimatedRevenue = "N/A";
-    if (avgPrice && listingReviews !== "N/A") {
-      estimatedRevenue = `$${Math.round(parseInt(listingReviews) * avgPrice).toLocaleString()}`;
-    }
-
-    // ✅ Creation date
-    let creationDate = "N/A";
-    $("script[type='application/ld+json']").each((_, el) => {
-      try {
-        const json = JSON.parse($(el).html());
-        if (json?.dateCreated) {
-          creationDate = json.dateCreated.split("T")[0];
-        }
-      } catch (e) {}
-    });
-
-    // ✅ Favorites
-    let favorites = "N/A";
-    const favText = $("span:contains('favorites')").text();
-    const favMatch = favText.match(/(\d[\d,]*)/);
-    if (favMatch) {
-      favorites = favMatch[1].replace(/,/g, "");
-    }
-
-    // ✅ Estimated views per month
-    let viewsPerMonth = "N/A";
-    if (favorites !== "N/A") {
-      viewsPerMonth = `${parseInt(favorites) * 3}`;
+    if (avgPrice && shopSales !== "N/A") {
+      estimatedRevenue = `$${Math.round(parseInt(shopSales) * avgPrice).toLocaleString()}`;
     }
 
     return {
@@ -112,11 +88,8 @@ export async function scrapeEtsy(url) {
       shopName,
       rating,
       reviews,
-      listingReviews,
+      shopSales,
       estimatedRevenue,
-      creationDate,
-      favorites,
-      viewsPerMonth
     };
   } catch (error) {
     console.error("❌ Scraping error:", error.message);
@@ -126,11 +99,8 @@ export async function scrapeEtsy(url) {
       shopName: "N/A",
       rating: "N/A",
       reviews: "N/A",
-      listingReviews: "N/A",
+      shopSales: "N/A",
       estimatedRevenue: "N/A",
-      creationDate: "N/A",
-      favorites: "N/A",
-      viewsPerMonth: "N/A"
     };
   }
 }
