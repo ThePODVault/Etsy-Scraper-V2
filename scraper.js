@@ -17,27 +17,21 @@ export async function scrapeEtsy(url) {
     // Title
     const title = $("h1[data-buy-box-listing-title]").text().trim() || "N/A";
 
-    // Shop Name: multiple fallbacks
+    // Shop Name (3 fallback selectors)
     const shopName =
-      $("div[data-region='shop-name'] a").text().trim() ||
-      $("p.wt-text-body-01 span.wt-text-link-no-underline").text().trim() ||
-      $("div.shop-name-and-title-container span.text-body-larger").first().text().trim() ||
+      $("[data-region='shop-name'] a").first().text().trim() ||
+      $("a[data-shop-name]").text().trim() ||
+      $("div[data-selector='shop-name'] span").text().trim() ||
       "N/A";
 
     // Rating
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
-    // Reviews: get the numeric count
-    let reviews =
-      $("span[data-review-count]").text().trim() ||
-      $("a[href*='reviews']").text().trim() ||
-      $("span:contains('reviews')").first().text().trim() ||
-      "N/A";
+    // Review count (cleaned to number only)
+    let reviews = $("span[data-review-count]").text().trim() || "N/A";
+    reviews = reviews.replace(/[^\d]/g, "") || "N/A";
 
-    const numericReviewMatch = reviews.replace(/[^\d]/g, "");
-    reviews = numericReviewMatch || "N/A";
-
-    // Prices from dropdown
+    // Price (dropdown or static)
     const priceOptions = [];
     $("select#inventory-variation-select-0 option").each((i, el) => {
       const text = $(el).text().trim();
@@ -45,6 +39,12 @@ export async function scrapeEtsy(url) {
         priceOptions.push(text);
       }
     });
+
+    // Static fallback price if dropdown isn't available
+    if (priceOptions.length === 0) {
+      const staticPrice = $("[data-buy-box-region='price']").text().trim();
+      if (staticPrice) priceOptions.push(staticPrice);
+    }
 
     return {
       title,
