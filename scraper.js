@@ -29,13 +29,14 @@ export async function scrapeEtsy(url) {
       }
     });
 
+    // Fallback price
     if (priceOptions.length === 0) {
       let fallback = $("[data-buy-box-region='price']").text().trim();
       fallback = fallback.replace(/\s+/g, " ").replace(/Loading/i, "").trim();
       if (fallback) priceOptions.push(fallback);
     }
 
-    // JSON-LD metadata for shop name & reviews
+    // JSON-LD metadata
     let shopName = "N/A";
     let reviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
@@ -50,22 +51,22 @@ export async function scrapeEtsy(url) {
           }
         }
       } catch {
-        // ignore
+        // silent catch
       }
     });
 
-    // 🟢 Shop Sales (visible in sidebar)
+    // Shop sales
     let shopSales = "N/A";
-    const shopSalesText = $("div:contains('Sales')").filter((_, el) => {
-      return $(el).text().trim().match(/\d[\d,\.]*\s+Sales/);
-    }).first().text().trim();
-    const shopSalesMatch = shopSalesText.match(/(\d[\d,\.]*)\s+Sales/i);
-    if (shopSalesMatch) {
-      shopSales = shopSalesMatch[1].replace(/,/g, "");
-    }
+    $("div:contains('Sales')").each((_, el) => {
+      const text = $(el).text();
+      const match = text.match(/(\d[\d,]*)\s+Sales/);
+      if (match) {
+        shopSales = match[1].replace(/,/g, "");
+      }
+    });
 
-    // 🟢 Estimate Revenue
-    let estimatedRevenue = "N/A";
+    // Estimate average price
+    let avgPrice = null;
     const prices = priceOptions
       .map((p) => {
         const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
@@ -73,8 +74,13 @@ export async function scrapeEtsy(url) {
       })
       .filter((val) => val !== null);
 
-    if (shopSales !== "N/A" && prices.length > 0) {
-      const avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
+    if (prices.length) {
+      avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
+    }
+
+    // Estimated revenue
+    let estimatedRevenue = "N/A";
+    if (avgPrice && shopSales !== "N/A") {
       estimatedRevenue = `$${Math.round(parseInt(shopSales) * avgPrice).toLocaleString()}`;
     }
 
