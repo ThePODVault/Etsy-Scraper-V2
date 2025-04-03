@@ -9,47 +9,67 @@ export async function scrapeEtsy(url) {
   if (!apiKey) throw new Error("SCRAPER_API_KEY not set");
 
   const proxyUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
-
   const response = await axios.get(proxyUrl);
   const $ = cheerio.load(response.data);
 
+  // ✅ Title
   const title = $("h1[data-buy-box-listing-title]").text().trim() || "N/A";
 
+  // ✅ Price Variants (Filter out colors, keep sizes/prices only)
   const priceOptions = [];
   $("[data-selector='listing-page-variations'] select option").each((_, el) => {
-    const optionText = $(el).text().trim();
-    if (optionText && !optionText.toLowerCase().includes("select")) {
-      priceOptions.push(optionText);
+    const text = $(el).text().trim();
+    if (
+      text &&
+      !text.toLowerCase().includes("select") &&
+      /\$\d/.test(text)
+    ) {
+      priceOptions.push(text);
     }
   });
 
-  const price = priceOptions.length ? priceOptions : [$("[data-buy-box-region=price]").first().text().trim() || "N/A"];
+  const price =
+    priceOptions.length > 0
+      ? priceOptions
+      : [$("[data-buy-box-region=price]").first().text().trim() || "N/A"];
 
+  // ✅ Shop Name
   const shopName =
-    $("[data-buy-box-region='seller-name'] a").first().text().trim() ||
+    $("[data-region='shop-name']").first().text().trim() ||
     $("div.wt-text-body-01.wt-line-height-tight.wt-break-word").first().text().trim() ||
+    $("p:contains('Shop policies')").prev("p").text().trim() ||
     "N/A";
 
-  const rating = $("input[name=rating]").attr("value") || "N/A";
+  // ✅ Rating
+  const rating = $("input[name='rating']").attr("value") || "N/A";
 
+  // ✅ Reviews (Number only)
   let reviews = "N/A";
-  const reviewsText = $("span[data-review-count]").first().text().trim();
-  const reviewsMatch = reviewsText.match(/\d[\d,\.]*/);
-  if (reviewsMatch) {
-    reviews = reviewsMatch[0].replace(",", "");
-  }
+  const reviewText = $("span[data-review-count]").text().trim();
+  const reviewMatch = reviewText.match(/\d[\d,]*/);
+  if (reviewMatch) reviews = reviewMatch[0].replace(/,/g, "");
 
-  const image = $("img[data-index='0']").attr("src") || $("img").first().attr("src") || "N/A";
+  // ✅ Main Image
+  const image =
+    $("img[data-index='0']").attr("src") ||
+    $("img.wt-max-width-full").first().attr("src") ||
+    "N/A";
 
-  let categories = [];
+  // ✅ Categories
+  const categories = [];
   $("ul[aria-label='Breadcrumb'] li a").each((_, el) => {
     const category = $(el).text().trim();
-    if (category && !category.includes("Home") && !category.includes("Etsy")) {
+    if (
+      category &&
+      !category.toLowerCase().includes("home") &&
+      !category.toLowerCase().includes("etsy")
+    ) {
       categories.push(category);
     }
   });
 
-  let tags = [];
+  // ✅ Tags
+  const tags = [];
   $("a.wt-tag").each((_, el) => {
     const tag = $(el).text().trim();
     if (tag) tags.push(tag);
