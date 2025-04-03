@@ -51,21 +51,22 @@ export async function scrapeEtsy(url) {
           }
         }
       } catch (err) {
-        // skip malformed JSON
+        // skip invalid JSON
       }
     });
 
     // Shop Sales
-let shopSales = "N/A";
-const salesSelector = $("span:contains('Sales'), div:contains('Sales')");
-salesSelector.each((_, el) => {
-  const text = $(el).text();
-  const match = text.match(/([\d,]+)\s+Sales/i);
-  if (match) {
-    shopSales = match[1].replace(/,/g, "");
-    return false; // break loop
-  }
-});
+    let shopSales = "N/A";
+    $("*").each((_, el) => {
+      const text = $(el).text().trim();
+      if (/^[\d,]+\s+sales$/i.test(text)) {
+        const match = text.match(/^([\d,]+)\s+sales$/i);
+        if (match) {
+          shopSales = match[1].replace(/,/g, "");
+          return false; // break loop
+        }
+      }
+    });
 
     // Estimate average price
     let avgPrice = null;
@@ -80,7 +81,7 @@ salesSelector.each((_, el) => {
       avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
     }
 
-    // Estimated store revenue
+    // Estimated revenue
     let estimatedRevenue = "N/A";
     if (avgPrice && shopSales !== "N/A") {
       estimatedRevenue = `$${Math.round(parseInt(shopSales) * avgPrice).toLocaleString()}`;
