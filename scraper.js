@@ -34,22 +34,21 @@ export async function scrapeEtsy(url) {
     }
 
     let shopName = "N/A";
-    let listingReviews = "N/A";
+    let reviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
       try {
         const json = JSON.parse($(el).html());
         if (json["@type"] === "Product") {
           if (json?.brand?.name) shopName = json.brand.name;
           if (json?.aggregateRating?.reviewCount)
-            listingReviews = json.aggregateRating.reviewCount.toString();
+            reviews = json.aggregateRating.reviewCount.toString();
         }
       } catch {}
     });
 
-    // ✅ NEW: Listing-specific review count (if available)
-    const reviewsFromTab =
-      $('button[role="tab"]').first().text().match(/\d+/)?.[0];
-    if (reviewsFromTab) listingReviews = reviewsFromTab;
+    // ✅ Extract listing-specific reviews
+    const listingReviewsFromPage =
+      $('button[role="tab"]').first().text().match(/\d+/)?.[0] || reviews;
 
     const rawDesc = $("[data-id='description-text']").text().trim();
     const description = rawDesc || "N/A";
@@ -75,16 +74,16 @@ export async function scrapeEtsy(url) {
         : null;
 
     const estimatedMonthlyRevenue =
-      avgPrice && listingReviews !== "N/A"
+      avgPrice && listingReviewsFromPage !== "N/A"
         ? `$${Math.round(
-            (parseInt(listingReviews) * avgPrice) / 12
+            (parseInt(listingReviewsFromPage) * avgPrice) / 12
           ).toLocaleString()}`
         : "N/A";
 
     const estimatedYearlyRevenue =
-      avgPrice && listingReviews !== "N/A"
+      avgPrice && listingReviewsFromPage !== "N/A"
         ? `$${Math.round(
-            parseInt(listingReviews) * avgPrice
+            parseInt(listingReviewsFromPage) * avgPrice
           ).toLocaleString()}`
         : "N/A";
 
@@ -117,15 +116,16 @@ export async function scrapeEtsy(url) {
         console.error("❌ Failed to scrape about page:", err.message);
       }
 
+      // ✅ Scrape shop review count from main shop page
       try {
         const shopUrl = `https://www.etsy.com/shop/${shopName}`;
         const shopRes = await axios.get(proxy(shopUrl));
         const $$$ = cheerio.load(shopRes.data);
-        const shopText = $$$.text();
 
-        const reviewsMatch = shopText.match(/([0-9,]+)\s+reviews/i);
-        if (reviewsMatch) {
-          shopReviews = reviewsMatch[1].replace(/,/g, "");
+        const badgeText = $$$("button[role='tab']").eq(1).text();
+        const badgeMatch = badgeText.match(/\d+/);
+        if (badgeMatch) {
+          shopReviews = badgeMatch[0];
         }
       } catch (err) {
         console.error("❌ Failed to scrape shop page for reviews:", err.message);
@@ -153,7 +153,7 @@ export async function scrapeEtsy(url) {
       price: priceOptions.length > 0 ? priceOptions : "N/A",
       shopName,
       rating,
-      listingReviews,
+      listingReviews: listingReviewsFromPage,
       estimatedRevenue: estimatedYearlyRevenue,
       estimatedMonthlyRevenue,
       description,
