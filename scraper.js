@@ -4,7 +4,6 @@ import dotenv from "dotenv";
 import OpenAI from "openai";
 
 dotenv.config();
-
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export async function scrapeEtsy(url) {
@@ -46,9 +45,14 @@ export async function scrapeEtsy(url) {
       } catch {}
     });
 
-    // ✅ Extract listing-specific reviews
+    // ✅ Extract listing-specific review count
     const listingReviewsFromPage =
       $('button[role="tab"]').first().text().match(/\d+/)?.[0] || reviews;
+
+    // ✅ Extract total shop reviews (from “Other items” tab)
+    const otherTabText = $('button[role="tab"]').eq(1).text();
+    const shopReviewsMatch = otherTabText.match(/\d+/);
+    const shopReviews = shopReviewsMatch ? shopReviewsMatch[0] : "N/A";
 
     const rawDesc = $("[data-id='description-text']").text().trim();
     const description = rawDesc || "N/A";
@@ -94,7 +98,6 @@ export async function scrapeEtsy(url) {
 
     let shopCreationYear = "N/A";
     let shopSales = "N/A";
-    let shopReviews = "N/A";
 
     if (shopName !== "N/A") {
       try {
@@ -115,24 +118,9 @@ export async function scrapeEtsy(url) {
       } catch (err) {
         console.error("❌ Failed to scrape about page:", err.message);
       }
-
-      // ✅ Scrape shop review count from main shop page
-      try {
-        const shopUrl = `https://www.etsy.com/shop/${shopName}`;
-        const shopRes = await axios.get(proxy(shopUrl));
-        const $$$ = cheerio.load(shopRes.data);
-
-        const badgeText = $$$("button[role='tab']").eq(1).text();
-        const badgeMatch = badgeText.match(/\d+/);
-        if (badgeMatch) {
-          shopReviews = badgeMatch[0];
-        }
-      } catch (err) {
-        console.error("❌ Failed to scrape shop page for reviews:", err.message);
-      }
     }
 
-    // Generate AI Tags
+    // ✅ AI-generated tags
     let tags = [];
     try {
       const prompt = `Extract 13 high-converting Etsy tags from this listing title and description. Each tag must be 1–20 characters. Return them as a JSON array only:\n\nTitle: ${title}\n\nDescription: ${description}`;
@@ -154,6 +142,7 @@ export async function scrapeEtsy(url) {
       shopName,
       rating,
       listingReviews: listingReviewsFromPage,
+      shopReviews,
       estimatedRevenue: estimatedYearlyRevenue,
       estimatedMonthlyRevenue,
       description,
@@ -161,7 +150,6 @@ export async function scrapeEtsy(url) {
       images: [...new Set(images)],
       shopCreationYear,
       shopSales,
-      shopReviews,
       tags,
     };
   } catch (err) {
@@ -172,6 +160,7 @@ export async function scrapeEtsy(url) {
       shopName: "N/A",
       rating: "N/A",
       listingReviews: "N/A",
+      shopReviews: "N/A",
       estimatedRevenue: "N/A",
       estimatedMonthlyRevenue: "N/A",
       description: "N/A",
@@ -179,7 +168,6 @@ export async function scrapeEtsy(url) {
       images: [],
       shopCreationYear: "N/A",
       shopSales: "N/A",
-      shopReviews: "N/A",
       tags: [],
     };
   }
