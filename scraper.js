@@ -46,6 +46,10 @@ export async function scrapeEtsy(url) {
       } catch {}
     });
 
+    // ✅ NEW: Listing-specific review count from tab (This item)
+    const listingReviewsFromPage =
+      $('button[role="tab"]').first().text().match(/\d+/)?.[0] || reviews;
+
     const rawDesc = $("[data-id='description-text']").text().trim();
     const description = rawDesc || "N/A";
 
@@ -70,13 +74,17 @@ export async function scrapeEtsy(url) {
         : null;
 
     const estimatedMonthlyRevenue =
-      avgPrice && reviews !== "N/A"
-        ? `$${Math.round((parseInt(reviews) * avgPrice) / 12).toLocaleString()}`
+      avgPrice && listingReviewsFromPage !== "N/A"
+        ? `$${Math.round(
+            (parseInt(listingReviewsFromPage) * avgPrice) / 12
+          ).toLocaleString()}`
         : "N/A";
 
     const estimatedYearlyRevenue =
-      avgPrice && reviews !== "N/A"
-        ? `$${Math.round(parseInt(reviews) * avgPrice).toLocaleString()}`
+      avgPrice && listingReviewsFromPage !== "N/A"
+        ? `$${Math.round(
+            parseInt(listingReviewsFromPage) * avgPrice
+          ).toLocaleString()}`
         : "N/A";
 
     const category =
@@ -129,7 +137,7 @@ export async function scrapeEtsy(url) {
       price: priceOptions.length > 0 ? priceOptions : "N/A",
       shopName,
       rating,
-      listingReviews: reviews,
+      listingReviews: listingReviewsFromPage,
       estimatedRevenue: estimatedYearlyRevenue,
       estimatedMonthlyRevenue,
       description,
