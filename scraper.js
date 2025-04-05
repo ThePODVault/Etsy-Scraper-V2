@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import OpenAI from "openai";
 
 dotenv.config();
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export async function scrapeEtsy(url) {
@@ -33,26 +34,21 @@ export async function scrapeEtsy(url) {
     }
 
     let shopName = "N/A";
-    let reviews = "N/A";
+    let listingReviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
       try {
         const json = JSON.parse($(el).html());
         if (json["@type"] === "Product") {
           if (json?.brand?.name) shopName = json.brand.name;
           if (json?.aggregateRating?.reviewCount)
-            reviews = json.aggregateRating.reviewCount.toString();
+            listingReviews = json.aggregateRating.reviewCount.toString();
         }
       } catch {}
     });
 
-    // ✅ Extract listing-specific review count
+    // ✅ NEW: Listing-specific review count from tab (This item)
     const listingReviewsFromPage =
-      $('button[role="tab"]').first().text().match(/\d+/)?.[0] || reviews;
-
-    // ✅ Extract total shop reviews (from “Other items” tab)
-    const otherTabText = $('button[role="tab"]').eq(1).text();
-    const shopReviewsMatch = otherTabText.match(/\d+/);
-    const shopReviews = shopReviewsMatch ? shopReviewsMatch[0] : "N/A";
+      $('button[role="tab"]').first().text().match(/\d+/)?.[0] || listingReviews;
 
     const rawDesc = $("[data-id='description-text']").text().trim();
     const description = rawDesc || "N/A";
@@ -98,9 +94,11 @@ export async function scrapeEtsy(url) {
 
     let shopCreationYear = "N/A";
     let shopSales = "N/A";
+    let shopReviews = "N/A";
 
     if (shopName !== "N/A") {
       try {
+        // 🛍️ Get sales and creation year from About page
         const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
         const aboutRes = await axios.get(proxy(aboutUrl));
         const $$ = cheerio.load(aboutRes.data);
@@ -118,9 +116,22 @@ export async function scrapeEtsy(url) {
       } catch (err) {
         console.error("❌ Failed to scrape about page:", err.message);
       }
+
+      try {
+        // ⭐️ NEW: Get total reviews from Reviews tab
+        const reviewsUrl = `https://www.etsy.com/shop/${shopName}/reviews`;
+        const reviewRes = await axios.get(proxy(reviewsUrl));
+        const $$$ = cheerio.load(reviewRes.data);
+        const reviewMatch = $$$.text().match(/Average item review\s+★+ \(([\d,]+)\)/i);
+        if (reviewMatch) {
+          shopReviews = reviewMatch[1].replace(/,/g, "");
+        }
+      } catch (err) {
+        console.error("❌ Failed to scrape reviews page:", err.message);
+      }
     }
 
-    // ✅ AI-generated tags
+    // 🧠 AI Tags
     let tags = [];
     try {
       const prompt = `Extract 13 high-converting Etsy tags from this listing title and description. Each tag must be 1–20 characters. Return them as a JSON array only:\n\nTitle: ${title}\n\nDescription: ${description}`;
