@@ -46,7 +46,7 @@ export async function scrapeEtsy(url) {
       } catch {}
     });
 
-    // ✅ NEW: Listing-specific review count from tab (This item)
+    // ✅ Listing-specific reviews
     const listingReviewsFromPage =
       $('button[role="tab"]').first().text().match(/\d+/)?.[0] || reviews;
 
@@ -94,6 +94,7 @@ export async function scrapeEtsy(url) {
 
     let shopCreationYear = "N/A";
     let shopSales = "N/A";
+    let shopReviews = "N/A"; // ✅ New field
 
     if (shopName !== "N/A") {
       try {
@@ -111,12 +112,17 @@ export async function scrapeEtsy(url) {
         if (salesMatch) {
           shopSales = salesMatch[1].replace(/,/g, "");
         }
+
+        const reviewsMatch = bodyText.match(/([\d,]+)\s+reviews/i); // ✅ New pattern
+        if (reviewsMatch) {
+          shopReviews = reviewsMatch[1].replace(/,/g, "");
+        }
       } catch (err) {
         console.error("❌ Failed to scrape about page:", err.message);
       }
     }
 
-    // Generate AI Tags
+    // ✅ AI-Generated Tags
     let tags = [];
     try {
       const prompt = `Extract 13 high-converting Etsy tags from this listing title and description. Each tag must be 1–20 characters. Return them as a JSON array only:\n\nTitle: ${title}\n\nDescription: ${description}`;
@@ -145,6 +151,7 @@ export async function scrapeEtsy(url) {
       images: [...new Set(images)],
       shopCreationYear,
       shopSales,
+      shopReviews, // ✅ Added to output
       tags,
     };
   } catch (err) {
@@ -162,6 +169,7 @@ export async function scrapeEtsy(url) {
       images: [],
       shopCreationYear: "N/A",
       shopSales: "N/A",
+      shopReviews: "N/A", // ✅ default fallback
       tags: [],
     };
   }
