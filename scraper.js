@@ -94,7 +94,6 @@ export async function scrapeEtsy(url) {
 
     let shopCreationYear = "N/A";
     let shopSales = "N/A";
-    let shopReviews = "N/A";
 
     if (shopName !== "N/A") {
       try {
@@ -114,21 +113,6 @@ export async function scrapeEtsy(url) {
         }
       } catch (err) {
         console.error("❌ Failed to scrape about page:", err.message);
-      }
-
-      // ✅ NEW: Scrape shop reviews count from /reviews page
-      try {
-        const reviewsUrl = `https://www.etsy.com/shop/${shopName}/reviews`;
-        const reviewsRes = await axios.get(proxy(reviewsUrl));
-        const $$$ = cheerio.load(reviewsRes.data);
-        const match = $$$("span:contains('Average item review')")
-          .text()
-          .match(/\(([\d,]+)\)/);
-        if (match) {
-          shopReviews = match[1].replace(/,/g, "");
-        }
-      } catch (err) {
-        console.error("❌ Failed to scrape reviews page:", err.message);
       }
     }
 
@@ -154,7 +138,6 @@ export async function scrapeEtsy(url) {
       shopName,
       rating,
       listingReviews: listingReviewsFromPage,
-      shopReviews,
       estimatedRevenue: estimatedYearlyRevenue,
       estimatedMonthlyRevenue,
       description,
@@ -172,7 +155,6 @@ export async function scrapeEtsy(url) {
       shopName: "N/A",
       rating: "N/A",
       listingReviews: "N/A",
-      shopReviews: "N/A",
       estimatedRevenue: "N/A",
       estimatedMonthlyRevenue: "N/A",
       description: "N/A",
