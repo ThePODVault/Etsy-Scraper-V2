@@ -34,21 +34,22 @@ export async function scrapeEtsy(url) {
     }
 
     let shopName = "N/A";
-    let reviews = "N/A";
+    let listingReviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
       try {
         const json = JSON.parse($(el).html());
         if (json["@type"] === "Product") {
           if (json?.brand?.name) shopName = json.brand.name;
           if (json?.aggregateRating?.reviewCount)
-            reviews = json.aggregateRating.reviewCount.toString();
+            listingReviews = json.aggregateRating.reviewCount.toString();
         }
       } catch {}
     });
 
-    // ✅ Listing-specific reviews
-    const listingReviewsFromPage =
-      $('button[role="tab"]').first().text().match(/\d+/)?.[0] || reviews;
+    // ✅ NEW: Listing-specific review count (if available)
+    const reviewsFromTab =
+      $('button[role="tab"]').first().text().match(/\d+/)?.[0];
+    if (reviewsFromTab) listingReviews = reviewsFromTab;
 
     const rawDesc = $("[data-id='description-text']").text().trim();
     const description = rawDesc || "N/A";
@@ -74,16 +75,16 @@ export async function scrapeEtsy(url) {
         : null;
 
     const estimatedMonthlyRevenue =
-      avgPrice && listingReviewsFromPage !== "N/A"
+      avgPrice && listingReviews !== "N/A"
         ? `$${Math.round(
-            (parseInt(listingReviewsFromPage) * avgPrice) / 12
+            (parseInt(listingReviews) * avgPrice) / 12
           ).toLocaleString()}`
         : "N/A";
 
     const estimatedYearlyRevenue =
-      avgPrice && listingReviewsFromPage !== "N/A"
+      avgPrice && listingReviews !== "N/A"
         ? `$${Math.round(
-            parseInt(listingReviewsFromPage) * avgPrice
+            parseInt(listingReviews) * avgPrice
           ).toLocaleString()}`
         : "N/A";
 
@@ -94,7 +95,7 @@ export async function scrapeEtsy(url) {
 
     let shopCreationYear = "N/A";
     let shopSales = "N/A";
-    let shopReviews = "N/A"; // ✅ New field
+    let shopReviews = "N/A";
 
     if (shopName !== "N/A") {
       try {
@@ -112,17 +113,26 @@ export async function scrapeEtsy(url) {
         if (salesMatch) {
           shopSales = salesMatch[1].replace(/,/g, "");
         }
+      } catch (err) {
+        console.error("❌ Failed to scrape about page:", err.message);
+      }
 
-        const reviewsMatch = bodyText.match(/([\d,]+)\s+reviews/i); // ✅ New pattern
+      try {
+        const shopUrl = `https://www.etsy.com/shop/${shopName}`;
+        const shopRes = await axios.get(proxy(shopUrl));
+        const $$$ = cheerio.load(shopRes.data);
+        const shopText = $$$.text();
+
+        const reviewsMatch = shopText.match(/([0-9,]+)\s+reviews/i);
         if (reviewsMatch) {
           shopReviews = reviewsMatch[1].replace(/,/g, "");
         }
       } catch (err) {
-        console.error("❌ Failed to scrape about page:", err.message);
+        console.error("❌ Failed to scrape shop page for reviews:", err.message);
       }
     }
 
-    // ✅ AI-Generated Tags
+    // Generate AI Tags
     let tags = [];
     try {
       const prompt = `Extract 13 high-converting Etsy tags from this listing title and description. Each tag must be 1–20 characters. Return them as a JSON array only:\n\nTitle: ${title}\n\nDescription: ${description}`;
@@ -143,7 +153,7 @@ export async function scrapeEtsy(url) {
       price: priceOptions.length > 0 ? priceOptions : "N/A",
       shopName,
       rating,
-      listingReviews: listingReviewsFromPage,
+      listingReviews,
       estimatedRevenue: estimatedYearlyRevenue,
       estimatedMonthlyRevenue,
       description,
@@ -151,7 +161,7 @@ export async function scrapeEtsy(url) {
       images: [...new Set(images)],
       shopCreationYear,
       shopSales,
-      shopReviews, // ✅ Added to output
+      shopReviews,
       tags,
     };
   } catch (err) {
@@ -169,7 +179,7 @@ export async function scrapeEtsy(url) {
       images: [],
       shopCreationYear: "N/A",
       shopSales: "N/A",
-      shopReviews: "N/A", // ✅ default fallback
+      shopReviews: "N/A",
       tags: [],
     };
   }
