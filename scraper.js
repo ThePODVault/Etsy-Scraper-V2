@@ -34,21 +34,21 @@ export async function scrapeEtsy(url) {
     }
 
     let shopName = "N/A";
-    let listingReviews = "N/A";
+    let reviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
       try {
         const json = JSON.parse($(el).html());
         if (json["@type"] === "Product") {
           if (json?.brand?.name) shopName = json.brand.name;
           if (json?.aggregateRating?.reviewCount)
-            listingReviews = json.aggregateRating.reviewCount.toString();
+            reviews = json.aggregateRating.reviewCount.toString();
         }
       } catch {}
     });
 
     // ✅ NEW: Listing-specific review count from tab (This item)
     const listingReviewsFromPage =
-      $('button[role="tab"]').first().text().match(/\d+/)?.[0] || listingReviews;
+      $('button[role="tab"]').first().text().match(/\d+/)?.[0] || reviews;
 
     const rawDesc = $("[data-id='description-text']").text().trim();
     const description = rawDesc || "N/A";
@@ -98,7 +98,6 @@ export async function scrapeEtsy(url) {
 
     if (shopName !== "N/A") {
       try {
-        // 🛍️ Get sales and creation year from About page
         const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
         const aboutRes = await axios.get(proxy(aboutUrl));
         const $$ = cheerio.load(aboutRes.data);
@@ -117,21 +116,23 @@ export async function scrapeEtsy(url) {
         console.error("❌ Failed to scrape about page:", err.message);
       }
 
+      // ✅ NEW: Scrape shop reviews count from /reviews page
       try {
-        // ⭐️ NEW: Get total reviews from Reviews tab
         const reviewsUrl = `https://www.etsy.com/shop/${shopName}/reviews`;
-        const reviewRes = await axios.get(proxy(reviewsUrl));
-        const $$$ = cheerio.load(reviewRes.data);
-        const reviewMatch = $$$.text().match(/Average item review\s+★+ \(([\d,]+)\)/i);
-        if (reviewMatch) {
-          shopReviews = reviewMatch[1].replace(/,/g, "");
+        const reviewsRes = await axios.get(proxy(reviewsUrl));
+        const $$$ = cheerio.load(reviewsRes.data);
+        const match = $$$("span:contains('Average item review')")
+          .text()
+          .match(/\(([\d,]+)\)/);
+        if (match) {
+          shopReviews = match[1].replace(/,/g, "");
         }
       } catch (err) {
         console.error("❌ Failed to scrape reviews page:", err.message);
       }
     }
 
-    // 🧠 AI Tags
+    // Generate AI Tags
     let tags = [];
     try {
       const prompt = `Extract 13 high-converting Etsy tags from this listing title and description. Each tag must be 1–20 characters. Return them as a JSON array only:\n\nTitle: ${title}\n\nDescription: ${description}`;
