@@ -53,13 +53,17 @@ export async function scrapeEtsy(url) {
       } catch {}
     });
 
-    // ✅ Only use listing-specific reviews (do not fall back to anything else)
+    // ✅ Accurately extract review count from "This item" tab
     let listingReviewsFromPage = "N/A";
-    const listingTabText = $('button[role="tab"]').first().text();
-    const match = listingTabText.match(/(\d+)\s+review/);
-    if (match) {
-      listingReviewsFromPage = match[1];
-    }
+    $('button[role="tab"]').each((_, el) => {
+      const tabText = $(el).text().trim();
+      if (tabText.startsWith("This item")) {
+        const numberMatch = tabText.match(/This item\s*(\d+)/i);
+        if (numberMatch && numberMatch[1]) {
+          listingReviewsFromPage = numberMatch[1];
+        }
+      }
+    });
 
     const rawDesc = $("[data-id='description-text']").text().trim();
     const description = rawDesc || "N/A";
