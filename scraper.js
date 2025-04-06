@@ -11,8 +11,8 @@ function calculateDemandScore(estimatedRevenue, reviews) {
   const revenue = parseInt(estimatedRevenue.replace(/[^\d]/g, "")) || 0;
   const reviewCount = parseInt(reviews) || 0;
 
-  const revenueScore = Math.min(revenue / 200000 * 50, 50); // 0–50 pts
-  const reviewScore = Math.min(reviewCount / 1000 * 50, 50); // 0–50 pts
+  const revenueScore = Math.min((revenue / 200000) * 50, 50); // 0–50 pts
+  const reviewScore = Math.min((reviewCount / 1000) * 50, 50); // 0–50 pts
 
   return Math.round(revenueScore + reviewScore);
 }
@@ -44,20 +44,22 @@ export async function scrapeEtsy(url) {
     }
 
     let shopName = "N/A";
-    let reviews = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
       try {
         const json = JSON.parse($(el).html());
         if (json["@type"] === "Product") {
           if (json?.brand?.name) shopName = json.brand.name;
-          if (json?.aggregateRating?.reviewCount)
-            reviews = json.aggregateRating.reviewCount.toString();
         }
       } catch {}
     });
 
-    const listingReviewsFromPage =
-      $('button[role="tab"]').first().text().match(/\d+/)?.[0] || reviews;
+    // ✅ Only use listing-specific reviews (do not fall back to anything else)
+    let listingReviewsFromPage = "N/A";
+    const listingTabText = $('button[role="tab"]').first().text();
+    const match = listingTabText.match(/(\d+)\s+review/);
+    if (match) {
+      listingReviewsFromPage = match[1];
+    }
 
     const rawDesc = $("[data-id='description-text']").text().trim();
     const description = rawDesc || "N/A";
