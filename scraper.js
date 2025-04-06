@@ -7,6 +7,16 @@ dotenv.config();
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+function calculateDemandScore(estimatedRevenue, reviews) {
+  const revenue = parseInt(estimatedRevenue.replace(/[^\d]/g, "")) || 0;
+  const reviewCount = parseInt(reviews) || 0;
+
+  const revenueScore = Math.min(revenue / 200000 * 50, 50); // 0–50 pts
+  const reviewScore = Math.min(reviewCount / 1000 * 50, 50); // 0–50 pts
+
+  return Math.round(revenueScore + reviewScore);
+}
+
 export async function scrapeEtsy(url) {
   const apiKey = process.env.SCRAPER_API_KEY;
   if (!apiKey) throw new Error("SCRAPER_API_KEY not set");
@@ -46,7 +56,6 @@ export async function scrapeEtsy(url) {
       } catch {}
     });
 
-    // ✅ NEW: Listing-specific review count from tab (This item)
     const listingReviewsFromPage =
       $('button[role="tab"]').first().text().match(/\d+/)?.[0] || reviews;
 
@@ -87,6 +96,11 @@ export async function scrapeEtsy(url) {
           ).toLocaleString()}`
         : "N/A";
 
+    const demandScore = calculateDemandScore(
+      estimatedYearlyRevenue,
+      listingReviewsFromPage
+    );
+
     const category =
       $("a[href*='/c/']").last().text().trim() ||
       $("a[href*='/category/']").last().text().trim() ||
@@ -116,7 +130,6 @@ export async function scrapeEtsy(url) {
       }
     }
 
-    // Generate AI Tags
     let tags = [];
     try {
       const prompt = `Extract 13 high-converting Etsy tags from this listing title and description. Each tag must be 1–20 characters. Return them as a JSON array only:\n\nTitle: ${title}\n\nDescription: ${description}`;
@@ -140,6 +153,7 @@ export async function scrapeEtsy(url) {
       listingReviews: listingReviewsFromPage,
       estimatedRevenue: estimatedYearlyRevenue,
       estimatedMonthlyRevenue,
+      demandScore,
       description,
       category,
       images: [...new Set(images)],
@@ -157,6 +171,7 @@ export async function scrapeEtsy(url) {
       listingReviews: "N/A",
       estimatedRevenue: "N/A",
       estimatedMonthlyRevenue: "N/A",
+      demandScore: "N/A",
       description: "N/A",
       category: "N/A",
       images: [],
