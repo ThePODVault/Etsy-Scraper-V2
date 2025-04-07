@@ -37,13 +37,10 @@ export async function scrapeEtsy(url) {
       if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
     });
 
-    // 🔧 Safe fallback logic for missing price selectors
     if (priceOptions.length === 0) {
-      const fallbackElement = $(".wt-text-title-03.wt-mr-xs-2").first();
-      const fallbackText = fallbackElement.length ? fallbackElement.text().trim() : "";
-      if (fallbackText && /[\$€£]/.test(fallbackText)) {
-        priceOptions.push(fallbackText);
-      }
+      let fallback = $("[data-buy-box-region='price']").text().trim();
+      fallback = fallback.replace(/\s+/g, " ").replace(/Loading/i, "").trim();
+      if (fallback) priceOptions.push(fallback);
     }
 
     let shopName = "N/A";
@@ -56,7 +53,7 @@ export async function scrapeEtsy(url) {
       } catch {}
     });
 
-    // ✅ Listing-specific review extraction
+    // ✅ Accurately extract review count from "This item" tab
     let listingReviewsFromPage = "N/A";
     $('button[role="tab"]').each((_, el) => {
       const tabText = $(el).text().trim();
@@ -79,18 +76,17 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // 🔧 Improved price parsing
     const prices = priceOptions
       .map((p) => {
         const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
         return match ? parseFloat(match[1]) : null;
       })
-      .filter((val) => val !== null && val >= 4); // discard low upsells
+      .filter((val) => val !== null);
 
     const avgPrice =
       prices.length > 0
         ? prices.reduce((sum, p) => sum + p, 0) / prices.length
-        : 15; // fallback default
+        : null;
 
     const estimatedMonthlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
