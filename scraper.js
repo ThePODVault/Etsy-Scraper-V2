@@ -53,14 +53,16 @@ export async function scrapeEtsy(url) {
       } catch {}
     });
 
-    // ✅ PATCHED: Extract correct review count from “This item” tab
+    // ✅ PATCHED: Accurate "This item" review count using span text
     let listingReviewsFromPage = "N/A";
     $('button[role="tab"]').each((_, el) => {
-      const tab = $(el);
-      if (tab.text().includes("This item")) {
-        const spanText = tab.find("span").first().text().replace(/,/g, "");
-        if (spanText && /^\d+$/.test(spanText)) {
-          listingReviewsFromPage = spanText;
+      const tabText = $(el).text().trim();
+      const hasThisItem = tabText.startsWith("This item") || tabText.includes("This item");
+
+      if (hasThisItem) {
+        const rawNum = $(el).find("span").first().text().replace(/,/g, "").trim();
+        if (rawNum && /^\d+$/.test(rawNum)) {
+          listingReviewsFromPage = rawNum;
         }
       }
     });
