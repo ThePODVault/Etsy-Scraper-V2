@@ -38,10 +38,13 @@ export async function scrapeEtsy(url) {
     });
 
     if (priceOptions.length === 0) {
-      let fallback = $("[data-buy-box-region='price']").text().trim();
-      fallback = fallback.replace(/\s+/g, " ").replace(/Loading/i, "").trim();
-      if (fallback) priceOptions.push(fallback);
-    }
+  let salePrice = $(".wt-text-title-03").first().text().trim();
+  let originalPrice = $(".wt-text-strikethrough").first().text().trim();
+
+  const fallback = salePrice || originalPrice || "";
+
+  if (fallback) priceOptions.push(fallback);
+}
 
     let shopName = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
