@@ -11,8 +11,8 @@ function calculateDemandScore(estimatedRevenue, reviews) {
   const revenue = parseInt(estimatedRevenue.replace(/[^\d]/g, "")) || 0;
   const reviewCount = parseInt(reviews) || 0;
 
-  const revenueScore = Math.min((revenue / 200000) * 50, 50); // 0–50 pts
-  const reviewScore = Math.min((reviewCount / 1000) * 50, 50); // 0–50 pts
+  const revenueScore = Math.min((revenue / 200000) * 50, 50);
+  const reviewScore = Math.min((reviewCount / 1000) * 50, 50);
 
   return Math.round(revenueScore + reviewScore);
 }
@@ -28,32 +28,34 @@ export async function scrapeEtsy(url) {
     const response = await axios.get(proxy(url));
     const $ = cheerio.load(response.data);
 
-    const title = $("h1[data-buy-box-listing-title]").text().trim() || "N/A";
+    let title = $("h1[data-buy-box-listing-title]").text().trim();
+    if (!title) {
+      const ogTitle = $('meta[property="og:title"]').attr("content");
+      if (ogTitle) title = ogTitle.trim();
+    }
+    if (!title) title = "N/A";
+
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
-    // Grab all text nodes with currency symbols
-    const bodyText = $("body").text();
-    const priceMatches = bodyText.match(/[\$€£]\s?\d{1,3}(?:[.,]\d{2})?/g) || [];
+    const priceOptions = [];
+    $("select option").each((_, el) => {
+      const text = $(el).text().trim();
+      if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
+    });
 
-    const filteredPrices = priceMatches
-      .map(p => parseFloat(p.replace(/[^0-9.]/g, '')))
-      .filter(p => p > 1 && p < 1000);
-
-    // Select the most prominent valid price (highest frequency or fallback to middle)
-    let finalPrice = "N/A";
-    if (filteredPrices.length > 0) {
-      const counts = {};
-      filteredPrices.forEach(p => counts[p] = (counts[p] || 0) + 1);
-      const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-      finalPrice = `$${parseFloat(sorted[0][0]).toFixed(2)}`;
+    if (priceOptions.length === 0) {
+      let salePrice = $(".wt-text-title-03").first().text().trim();
+      let originalPrice = $(".wt-text-strikethrough").first().text().trim();
+      const fallback = salePrice || originalPrice || "";
+      if (fallback) priceOptions.push(fallback);
     }
 
     let shopName = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
       try {
         const json = JSON.parse($(el).html());
-        if (json["@type"] === "Product") {
-          if (json?.brand?.name) shopName = json.brand.name;
+        if (json["@type"] === "Product" && json?.brand?.name) {
+          shopName = json.brand.name;
         }
       } catch {}
     });
@@ -61,9 +63,7 @@ export async function scrapeEtsy(url) {
     let listingReviewsFromPage = "N/A";
     $('button[role="tab"]').each((_, el) => {
       const tabText = $(el).text().trim();
-      const hasThisItem = tabText.startsWith("This item") || tabText.includes("This item");
-
-      if (hasThisItem) {
+      if (tabText.startsWith("This item") || tabText.includes("This item")) {
         const rawNum = $(el).find("span").first().text().replace(/,/g, "").trim();
         if (rawNum && /^\d+$/.test(rawNum)) {
           listingReviewsFromPage = rawNum;
@@ -82,7 +82,17 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    const avgPrice = finalPrice !== "N/A" ? parseFloat(finalPrice.replace(/[^\d.]/g, "")) : null;
+    const prices = priceOptions
+      .map((p) => {
+        const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
+        return match ? parseFloat(match[1]) : null;
+      })
+      .filter((val) => val !== null && val >= 5);
+
+    const avgPrice =
+      prices.length > 0
+        ? prices.reduce((sum, p) => sum + p, 0) / prices.length
+        : null;
 
     const estimatedMonthlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
@@ -145,7 +155,7 @@ export async function scrapeEtsy(url) {
 
     return {
       title,
-      price: finalPrice,
+      price: prices.map((p) => `$${p.toFixed(2)}`) || "N/A",
       shopName,
       rating,
       listingReviews: listingReviewsFromPage,
@@ -169,7 +179,7 @@ export async function scrapeEtsy(url) {
       listingReviews: "N/A",
       estimatedRevenue: "N/A",
       estimatedMonthlyRevenue: "N/A",
-      demandScore: "N/A",
+      demandScore: 0,
       description: "N/A",
       category: "N/A",
       images: [],
