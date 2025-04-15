@@ -32,69 +32,23 @@ export async function scrapeEtsy(url) {
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
     const priceOptions = [];
-
     $("select option").each((_, el) => {
       const text = $(el).text().trim();
       if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
     });
 
-    // 🛠️ Fallback logic for price if not found in dropdowns
+    // 🔁 Enhanced fallback for listings without select options
     if (priceOptions.length === 0) {
-      let fallbackPrice = $(".wt-text-title-03").first().text().trim();
-      if (!/[\$€£]\d/.test(fallbackPrice)) {
-        // Extra fallback: search body for lines that look like prices
-        const allText = $("body").text();
-        const possiblePrices = allText
-          .split("\n")
-          .map((line) => line.trim())
-          .filter((line) => /^[\$€£]\d/.test(line) && !line.toLowerCase().includes("views"));
-
-        if (possiblePrices.length > 0) {
-          fallbackPrice = possiblePrices[0];
+      const rawText = $("body").text();
+      const fallbackMatch = rawText.match(/[\$€£]\d{1,3}(?:,\d{3})*(?:\.\d{2})?/g);
+      if (fallbackMatch) {
+        const cleanPrices = [...new Set(fallbackMatch.filter(p => /^\$?\d/.test(p)))];
+        if (cleanPrices.length > 0) {
+          console.log("✅ Using fallback price elements:", cleanPrices);
+          priceOptions.push(...cleanPrices);
         }
-      }
-
-      if (fallbackPrice && /[\$€£]\d/.test(fallbackPrice)) {
-        console.log("✅ Using fallback price:", fallbackPrice);
-        priceOptions.push(fallbackPrice);
-      } else {
-        console.log("⚠️ No valid fallback price found.");
       }
     }
-
-    let shopName = "N/A";
-    $("script[type='application/ld+json']").each((_, el) => {
-      try {
-        const json = JSON.parse($(el).html());
-        if (json["@type"] === "Product") {
-          if (json?.brand?.name) shopName = json.brand.name;
-        }
-      } catch {}
-    });
-
-    let listingReviewsFromPage = "N/A";
-    $('button[role="tab"]').each((_, el) => {
-      const tabText = $(el).text().trim();
-      const hasThisItem = tabText.startsWith("This item") || tabText.includes("This item");
-
-      if (hasThisItem) {
-        const rawNum = $(el).find("span").first().text().replace(/,/g, "").trim();
-        if (rawNum && /^\d+$/.test(rawNum)) {
-          listingReviewsFromPage = rawNum;
-        }
-      }
-    });
-
-    const rawDesc = $("[data-id='description-text']").text().trim();
-    const description = rawDesc || "N/A";
-
-    const images = [];
-    $("img").each((_, el) => {
-      const src = $(el).attr("src") || $(el).attr("data-src");
-      if (src && src.includes("etsystatic")) {
-        images.push(src.split("?")[0]);
-      }
-    });
 
     const prices = priceOptions
       .map((p) => {
@@ -107,6 +61,18 @@ export async function scrapeEtsy(url) {
       prices.length > 0
         ? prices.reduce((sum, p) => sum + p, 0) / prices.length
         : null;
+
+    const listingReviewsFromPage = (() => {
+      let reviews = "N/A";
+      $('button[role="tab"]').each((_, el) => {
+        const tabText = $(el).text().trim();
+        if (tabText.startsWith("This item") || tabText.includes("This item")) {
+          const rawNum = $(el).find("span").first().text().replace(/,/g, "").trim();
+          if (rawNum && /^\d+$/.test(rawNum)) reviews = rawNum;
+        }
+      });
+      return reviews;
+    })();
 
     const estimatedMonthlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
@@ -122,10 +88,30 @@ export async function scrapeEtsy(url) {
           ).toLocaleString()}`
         : "N/A";
 
-    const demandScore = calculateDemandScore(
-      estimatedYearlyRevenue,
-      listingReviewsFromPage
-    );
+    const demandScore = estimatedYearlyRevenue !== "N/A"
+      ? calculateDemandScore(estimatedYearlyRevenue, listingReviewsFromPage)
+      : "N/A";
+
+    let shopName = "N/A";
+    $("script[type='application/ld+json']").each((_, el) => {
+      try {
+        const json = JSON.parse($(el).html());
+        if (json["@type"] === "Product") {
+          if (json?.brand?.name) shopName = json.brand.name;
+        }
+      } catch {}
+    });
+
+    const rawDesc = $("[data-id='description-text']").text().trim();
+    const description = rawDesc || "N/A";
+
+    const images = [];
+    $("img").each((_, el) => {
+      const src = $(el).attr("src") || $(el).attr("data-src");
+      if (src && src.includes("etsystatic")) {
+        images.push(src.split("?")[0]);
+      }
+    });
 
     const category =
       $("a[href*='/c/']").last().text().trim() ||
