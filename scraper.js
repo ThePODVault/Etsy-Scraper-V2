@@ -10,10 +10,8 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 function calculateDemandScore(estimatedRevenue, reviews) {
   const revenue = parseInt(estimatedRevenue.replace(/[^\d]/g, "")) || 0;
   const reviewCount = parseInt(reviews) || 0;
-
   const revenueScore = Math.min((revenue / 200000) * 50, 50);
   const reviewScore = Math.min((reviewCount / 1000) * 50, 50);
-
   return Math.round(revenueScore + reviewScore);
 }
 
@@ -34,7 +32,7 @@ export async function scrapeEtsy(url) {
     const priceOptions = [];
     $("select option").each((_, el) => {
       const text = $(el).text().trim();
-      if (text && /[\$€£₹]\d/.test(text)) priceOptions.push(text);
+      if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
     });
 
     if (priceOptions.length === 0) {
@@ -44,29 +42,14 @@ export async function scrapeEtsy(url) {
       if (fallback) priceOptions.push(fallback);
     }
 
-    // 🌍 Global currency fallback if still empty
-    if (priceOptions.length === 0) {
-      $('[data-buy-box-region] span, [data-buy-box-region] div, [data-region="buybox"]').each((_, el) => {
-        const text = $(el).text().trim();
-        if (/[€£₹$]\s?\d+/.test(text)) {
-          const cleaned = text.match(/[€£₹$]\s?\d+(?:[.,]\d+)?/g);
-          if (cleaned) {
-            cleaned.forEach(p => {
-              if (!priceOptions.includes(p)) {
-                priceOptions.push(p.trim());
-              }
-            });
-          }
-        }
-      });
-    }
+    console.log("💵 Raw price options:", priceOptions);
 
     let shopName = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
       try {
         const json = JSON.parse($(el).html());
-        if (json["@type"] === "Product") {
-          if (json?.brand?.name) shopName = json.brand.name;
+        if (json["@type"] === "Product" && json?.brand?.name) {
+          shopName = json.brand.name;
         }
       } catch {}
     });
@@ -95,15 +78,24 @@ export async function scrapeEtsy(url) {
 
     const prices = priceOptions
       .map((p) => {
-        const match = p.match(/[\$€£₹](\d+(?:\.\d+)?)/);
+        const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
         return match ? parseFloat(match[1]) : null;
       })
       .filter((val) => val !== null);
+
+    console.log("💲 Converted prices (normalized):", prices);
 
     const avgPrice =
       prices.length > 0
         ? prices.reduce((sum, p) => sum + p, 0) / prices.length
         : null;
+
+    console.log("🧮 Average price:", avgPrice);
+    console.log("📝 Review count:", listingReviewsFromPage);
+
+    if (!avgPrice || listingReviewsFromPage === "N/A") {
+      console.warn("⚠️ Missing data for revenue calculation — avgPrice:", avgPrice, "reviews:", listingReviewsFromPage);
+    }
 
     const estimatedMonthlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
