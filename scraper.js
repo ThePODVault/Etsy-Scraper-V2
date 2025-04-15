@@ -19,8 +19,7 @@ export async function scrapeEtsy(url) {
   const apiKey = process.env.SCRAPER_API_KEY;
   if (!apiKey) throw new Error("SCRAPER_API_KEY not set");
 
-  const proxy = (url) =>
-    `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
+  const proxy = (url) => `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
 
   try {
     const response = await axios.get(proxy(url));
@@ -35,14 +34,21 @@ export async function scrapeEtsy(url) {
       if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
     });
 
+    // 🧠 Fallback logic when variation pricing is not found
     if (priceOptions.length === 0) {
-      let salePrice = $(".wt-text-title-03").first().text().trim();
-      let originalPrice = $(".wt-text-strikethrough").first().text().trim();
-      const fallback = salePrice || originalPrice || "";
-      if (fallback) priceOptions.push(fallback);
-    }
+      const possiblePrices = [];
 
-    console.log("💵 Raw price options:", priceOptions);
+      $(".wt-text-title-03, .wt-text-strikethrough").each((_, el) => {
+        const text = $(el).text().trim();
+        if (text && /[\$€£]\d/.test(text)) {
+          possiblePrices.push(text);
+        }
+      });
+
+      if (possiblePrices.length > 0) {
+        priceOptions.push(...new Set(possiblePrices));
+      }
+    }
 
     let shopName = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
@@ -57,7 +63,8 @@ export async function scrapeEtsy(url) {
     let listingReviewsFromPage = "N/A";
     $('button[role="tab"]').each((_, el) => {
       const tabText = $(el).text().trim();
-      if (tabText.startsWith("This item") || tabText.includes("This item")) {
+      const hasThisItem = tabText.startsWith("This item") || tabText.includes("This item");
+      if (hasThisItem) {
         const rawNum = $(el).find("span").first().text().replace(/,/g, "").trim();
         if (rawNum && /^\d+$/.test(rawNum)) {
           listingReviewsFromPage = rawNum;
@@ -83,19 +90,7 @@ export async function scrapeEtsy(url) {
       })
       .filter((val) => val !== null);
 
-    console.log("💲 Converted prices (normalized):", prices);
-
-    const avgPrice =
-      prices.length > 0
-        ? prices.reduce((sum, p) => sum + p, 0) / prices.length
-        : null;
-
-    console.log("🧮 Average price:", avgPrice);
-    console.log("📝 Review count:", listingReviewsFromPage);
-
-    if (!avgPrice || listingReviewsFromPage === "N/A") {
-      console.warn("⚠️ Missing data for revenue calculation — avgPrice:", avgPrice, "reviews:", listingReviewsFromPage);
-    }
+    const avgPrice = prices.length > 0 ? prices.reduce((sum, p) => sum + p, 0) / prices.length : null;
 
     const estimatedMonthlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
@@ -107,10 +102,7 @@ export async function scrapeEtsy(url) {
         ? `$${Math.round(parseInt(listingReviewsFromPage) * avgPrice).toLocaleString()}`
         : "N/A";
 
-    const demandScore = calculateDemandScore(
-      estimatedYearlyRevenue,
-      listingReviewsFromPage
-    );
+    const demandScore = calculateDemandScore(estimatedYearlyRevenue, listingReviewsFromPage);
 
     const category =
       $("a[href*='/c/']").last().text().trim() ||
@@ -127,9 +119,7 @@ export async function scrapeEtsy(url) {
         const $$ = cheerio.load(aboutRes.data);
         const bodyText = $$.text();
 
-        const yearMatch =
-          bodyText.match(/opened in (\d{4})/i) ||
-          bodyText.match(/on etsy since (\d{4})/i);
+        const yearMatch = bodyText.match(/opened in (\d{4})/i) || bodyText.match(/on etsy since (\d{4})/i);
         if (yearMatch) shopCreationYear = yearMatch[1];
 
         const salesMatch = bodyText.match(/([\d,]+)\s+sales/i);
