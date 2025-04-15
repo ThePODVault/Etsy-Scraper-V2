@@ -11,8 +11,8 @@ function calculateDemandScore(estimatedRevenue, reviews) {
   const revenue = parseInt(estimatedRevenue.replace(/[^\d]/g, "")) || 0;
   const reviewCount = parseInt(reviews) || 0;
 
-  const revenueScore = Math.min((revenue / 200000) * 50, 50);
-  const reviewScore = Math.min((reviewCount / 1000) * 50, 50);
+  const revenueScore = Math.min((revenue / 200000) * 50, 50); // 0–50 pts
+  const reviewScore = Math.min((reviewCount / 1000) * 50, 50); // 0–50 pts
 
   return Math.round(revenueScore + reviewScore);
 }
@@ -31,27 +31,26 @@ export async function scrapeEtsy(url) {
     const title = $("h1[data-buy-box-listing-title]").text().trim() || "N/A";
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
-    let priceOptions = [];
+    const priceOptions = [];
     $("select option").each((_, el) => {
       const text = $(el).text().trim();
-      if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
+      if (text && /^[\$€£]\d/.test(text)) priceOptions.push(text);
     });
 
-    // ✅ Fallback: Try looking for direct price spans
+    // 💵 Fallback: Try to pull visible prices on page if no <option> prices are found
     if (priceOptions.length === 0) {
-      let salePrice = $(".wt-text-title-03").first().text().trim();
-      let originalPrice = $(".wt-text-strikethrough").first().text().trim();
-      let regularPrice = $(".wt-text-title-01").first().text().trim();
-
-      const fallbackPrices = [salePrice, originalPrice, regularPrice].filter(Boolean);
-      console.log("✅ Using fallback price elements:", fallbackPrices);
-
-      if (fallbackPrices.length > 0) {
-        priceOptions.push(...fallbackPrices);
+      const fallbackText = $(".wt-text-title-03, .wt-text-strikethrough")
+        .map((_, el) => $(el).text().trim())
+        .get()
+        .filter((text) => text && /^[\$€£]\d/.test(text));
+      
+      if (fallbackText.length > 0) {
+        console.log("✅ Using fallback price elements:", fallbackText);
+        priceOptions.push(...fallbackText);
+      } else {
+        console.warn("⚠️ No price found at all.");
       }
     }
-
-    console.log("💵 Raw price options:", priceOptions);
 
     let shopName = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
@@ -94,15 +93,10 @@ export async function scrapeEtsy(url) {
       })
       .filter((val) => val !== null);
 
-    console.log("💲 Converted prices (normalized):", prices);
-
     const avgPrice =
       prices.length > 0
         ? prices.reduce((sum, p) => sum + p, 0) / prices.length
         : null;
-
-    console.log("🧮 Average price:", avgPrice);
-    console.log("📝 Review count:", listingReviewsFromPage);
 
     const estimatedMonthlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
@@ -117,8 +111,6 @@ export async function scrapeEtsy(url) {
             parseInt(listingReviewsFromPage) * avgPrice
           ).toLocaleString()}`
         : "N/A";
-
-    if (!avgPrice) console.warn("⚠️ Missing data for revenue calculation — avgPrice:", avgPrice, "reviews:", listingReviewsFromPage);
 
     const demandScore = calculateDemandScore(
       estimatedYearlyRevenue,
