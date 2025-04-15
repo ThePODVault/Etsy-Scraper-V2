@@ -10,8 +10,10 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 function calculateDemandScore(estimatedRevenue, reviews) {
   const revenue = parseInt(estimatedRevenue.replace(/[^\d]/g, "")) || 0;
   const reviewCount = parseInt(reviews) || 0;
+
   const revenueScore = Math.min((revenue / 200000) * 50, 50);
   const reviewScore = Math.min((reviewCount / 1000) * 50, 50);
+
   return Math.round(revenueScore + reviewScore);
 }
 
@@ -19,7 +21,8 @@ export async function scrapeEtsy(url) {
   const apiKey = process.env.SCRAPER_API_KEY;
   if (!apiKey) throw new Error("SCRAPER_API_KEY not set");
 
-  const proxy = (url) => `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
+  const proxy = (url) =>
+    `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
 
   try {
     const response = await axios.get(proxy(url));
@@ -31,22 +34,21 @@ export async function scrapeEtsy(url) {
     const priceOptions = [];
     $("select option").each((_, el) => {
       const text = $(el).text().trim();
-      if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
+      if (text && /[$€£]\d/.test(text)) priceOptions.push(text);
     });
 
-    // 🧠 Fallback logic when variation pricing is not found
     if (priceOptions.length === 0) {
-      const possiblePrices = [];
-
-      $(".wt-text-title-03, .wt-text-strikethrough").each((_, el) => {
+      const fallbackPrices = [];
+      $(".wt-text-title-03, .wt-text-title-01, .wt-text-strikethrough").each((_, el) => {
         const text = $(el).text().trim();
-        if (text && /[\$€£]\d/.test(text)) {
-          possiblePrices.push(text);
-        }
+        if (text && /[$€£]\d/.test(text)) fallbackPrices.push(text);
       });
 
-      if (possiblePrices.length > 0) {
-        priceOptions.push(...new Set(possiblePrices));
+      if (fallbackPrices.length > 0) {
+        console.log("✅ Using fallback price elements:", fallbackPrices);
+        priceOptions.push(...new Set(fallbackPrices));
+      } else {
+        console.log("⚠️ No price found at all.");
       }
     }
 
@@ -54,7 +56,7 @@ export async function scrapeEtsy(url) {
     $("script[type='application/ld+json']").each((_, el) => {
       try {
         const json = JSON.parse($(el).html());
-        if (json["@type"] === "Product" && json?.brand?.name) {
+        if (json["@type"] === "Product" && json.brand?.name) {
           shopName = json.brand.name;
         }
       } catch {}
@@ -63,34 +65,30 @@ export async function scrapeEtsy(url) {
     let listingReviewsFromPage = "N/A";
     $('button[role="tab"]').each((_, el) => {
       const tabText = $(el).text().trim();
-      const hasThisItem = tabText.startsWith("This item") || tabText.includes("This item");
-      if (hasThisItem) {
+      if (tabText.includes("This item")) {
         const rawNum = $(el).find("span").first().text().replace(/,/g, "").trim();
-        if (rawNum && /^\d+$/.test(rawNum)) {
-          listingReviewsFromPage = rawNum;
-        }
+        if (/^\d+$/.test(rawNum)) listingReviewsFromPage = rawNum;
       }
     });
 
-    const rawDesc = $("[data-id='description-text']").text().trim();
-    const description = rawDesc || "N/A";
+    const description = $("[data-id='description-text']").text().trim() || "N/A";
 
     const images = [];
     $("img").each((_, el) => {
       const src = $(el).attr("src") || $(el).attr("data-src");
-      if (src && src.includes("etsystatic")) {
-        images.push(src.split("?")[0]);
-      }
+      if (src?.includes("etsystatic")) images.push(src.split("?")[0]);
     });
 
     const prices = priceOptions
       .map((p) => {
-        const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
+        const match = p.match(/[$€£](\d+(?:\.\d+)?)/);
         return match ? parseFloat(match[1]) : null;
       })
       .filter((val) => val !== null);
 
-    const avgPrice = prices.length > 0 ? prices.reduce((sum, p) => sum + p, 0) / prices.length : null;
+    const avgPrice = prices.length > 0
+      ? prices.reduce((sum, p) => sum + p, 0) / prices.length
+      : null;
 
     const estimatedMonthlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
@@ -123,9 +121,7 @@ export async function scrapeEtsy(url) {
         if (yearMatch) shopCreationYear = yearMatch[1];
 
         const salesMatch = bodyText.match(/([\d,]+)\s+sales/i);
-        if (salesMatch) {
-          shopSales = salesMatch[1].replace(/,/g, "");
-        }
+        if (salesMatch) shopSales = salesMatch[1].replace(/,/g, "");
       } catch (err) {
         console.error("❌ Failed to scrape about page:", err.message);
       }
