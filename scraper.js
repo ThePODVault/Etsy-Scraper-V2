@@ -11,8 +11,8 @@ function calculateDemandScore(estimatedRevenue, reviews) {
   const revenue = parseInt(estimatedRevenue.replace(/[^\d]/g, "")) || 0;
   const reviewCount = parseInt(reviews) || 0;
 
-  const revenueScore = Math.min((revenue / 200000) * 50, 50); // 0–50 pts
-  const reviewScore = Math.min((reviewCount / 1000) * 50, 50); // 0–50 pts
+  const revenueScore = Math.min((revenue / 200000) * 50, 50);
+  const reviewScore = Math.min((reviewCount / 1000) * 50, 50);
 
   return Math.round(revenueScore + reviewScore);
 }
@@ -34,17 +34,32 @@ export async function scrapeEtsy(url) {
     const priceOptions = [];
     $("select option").each((_, el) => {
       const text = $(el).text().trim();
-      if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
+      if (text && /[\$€£₹]\d/.test(text)) priceOptions.push(text);
     });
 
     if (priceOptions.length === 0) {
-  let salePrice = $(".wt-text-title-03").first().text().trim();
-  let originalPrice = $(".wt-text-strikethrough").first().text().trim();
+      let salePrice = $(".wt-text-title-03").first().text().trim();
+      let originalPrice = $(".wt-text-strikethrough").first().text().trim();
+      const fallback = salePrice || originalPrice || "";
+      if (fallback) priceOptions.push(fallback);
+    }
 
-  const fallback = salePrice || originalPrice || "";
-
-  if (fallback) priceOptions.push(fallback);
-}
+    // 🌍 Global currency fallback if still empty
+    if (priceOptions.length === 0) {
+      $('[data-buy-box-region] span, [data-buy-box-region] div, [data-region="buybox"]').each((_, el) => {
+        const text = $(el).text().trim();
+        if (/[€£₹$]\s?\d+/.test(text)) {
+          const cleaned = text.match(/[€£₹$]\s?\d+(?:[.,]\d+)?/g);
+          if (cleaned) {
+            cleaned.forEach(p => {
+              if (!priceOptions.includes(p)) {
+                priceOptions.push(p.trim());
+              }
+            });
+          }
+        }
+      });
+    }
 
     let shopName = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
@@ -56,13 +71,10 @@ export async function scrapeEtsy(url) {
       } catch {}
     });
 
-    // ✅ PATCHED: Accurate "This item" review count using span text
     let listingReviewsFromPage = "N/A";
     $('button[role="tab"]').each((_, el) => {
       const tabText = $(el).text().trim();
-      const hasThisItem = tabText.startsWith("This item") || tabText.includes("This item");
-
-      if (hasThisItem) {
+      if (tabText.startsWith("This item") || tabText.includes("This item")) {
         const rawNum = $(el).find("span").first().text().replace(/,/g, "").trim();
         if (rawNum && /^\d+$/.test(rawNum)) {
           listingReviewsFromPage = rawNum;
@@ -83,7 +95,7 @@ export async function scrapeEtsy(url) {
 
     const prices = priceOptions
       .map((p) => {
-        const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
+        const match = p.match(/[\$€£₹](\d+(?:\.\d+)?)/);
         return match ? parseFloat(match[1]) : null;
       })
       .filter((val) => val !== null);
@@ -95,16 +107,12 @@ export async function scrapeEtsy(url) {
 
     const estimatedMonthlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
-        ? `$${Math.round(
-            (parseInt(listingReviewsFromPage) * avgPrice) / 12
-          ).toLocaleString()}`
+        ? `$${Math.round((parseInt(listingReviewsFromPage) * avgPrice) / 12).toLocaleString()}`
         : "N/A";
 
     const estimatedYearlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
-        ? `$${Math.round(
-            parseInt(listingReviewsFromPage) * avgPrice
-          ).toLocaleString()}`
+        ? `$${Math.round(parseInt(listingReviewsFromPage) * avgPrice).toLocaleString()}`
         : "N/A";
 
     const demandScore = calculateDemandScore(
