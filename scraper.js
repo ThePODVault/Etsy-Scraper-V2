@@ -11,8 +11,8 @@ function calculateDemandScore(estimatedRevenue, reviews) {
   const revenue = parseInt(estimatedRevenue.replace(/[^\d]/g, "")) || 0;
   const reviewCount = parseInt(reviews) || 0;
 
-  const revenueScore = Math.min((revenue / 200000) * 50, 50); // 0–50 pts
-  const reviewScore = Math.min((reviewCount / 1000) * 50, 50); // 0–50 pts
+  const revenueScore = Math.min((revenue / 200000) * 50, 50);
+  const reviewScore = Math.min((reviewCount / 1000) * 50, 50);
 
   return Math.round(revenueScore + reviewScore);
 }
@@ -32,19 +32,20 @@ export async function scrapeEtsy(url) {
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
     const priceOptions = [];
+
     $("select option").each((_, el) => {
       const text = $(el).text().trim();
       if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
     });
 
-    // Fallback: Sale or original price (for listings with/without sales)
+    // Fallback logic for listings without dropdowns or sales
     if (priceOptions.length === 0) {
-      const rawSalePrice = $(".wt-text-title-03").first().text().trim();
-      const rawOriginalPrice = $(".wt-text-strikethrough").first().text().trim();
-      const rawStandardPrice = $(".wt-display-flex-xs").first().text().trim(); // New fallback
-      const fallbackPrice = rawSalePrice || rawOriginalPrice || rawStandardPrice;
-      if (fallbackPrice && /[\$€£]\d/.test(fallbackPrice)) {
-        priceOptions.push(fallbackPrice);
+      const primaryPrice = $(".wt-text-title-03").first().text().trim();
+      const backupPrice = $(".wt-text-strikethrough").first().text().trim();
+
+      const fallback = primaryPrice || backupPrice || "";
+      if (fallback) {
+        priceOptions.push(fallback);
         console.log("✅ Using fallback price elements:", priceOptions);
       } else {
         console.log("⚠️ No price found at all.");
@@ -55,8 +56,8 @@ export async function scrapeEtsy(url) {
     $("script[type='application/ld+json']").each((_, el) => {
       try {
         const json = JSON.parse($(el).html());
-        if (json["@type"] === "Product" && json?.brand?.name) {
-          shopName = json.brand.name;
+        if (json["@type"] === "Product") {
+          if (json?.brand?.name) shopName = json.brand.name;
         }
       } catch {}
     });
@@ -64,9 +65,13 @@ export async function scrapeEtsy(url) {
     let listingReviewsFromPage = "N/A";
     $('button[role="tab"]').each((_, el) => {
       const tabText = $(el).text().trim();
-      if (tabText.startsWith("This item") || tabText.includes("This item")) {
+      const hasThisItem = tabText.startsWith("This item") || tabText.includes("This item");
+
+      if (hasThisItem) {
         const rawNum = $(el).find("span").first().text().replace(/,/g, "").trim();
-        if (rawNum && /^\d+$/.test(rawNum)) listingReviewsFromPage = rawNum;
+        if (rawNum && /^\d+$/.test(rawNum)) {
+          listingReviewsFromPage = rawNum;
+        }
       }
     });
 
@@ -88,24 +93,32 @@ export async function scrapeEtsy(url) {
       })
       .filter((val) => val !== null);
 
+    console.log("💵 Raw price options:", priceOptions);
+    console.log("💲 Converted prices (normalized):", prices);
+
     const avgPrice =
       prices.length > 0
         ? prices.reduce((sum, p) => sum + p, 0) / prices.length
         : null;
 
+    console.log("🧮 Average price:", avgPrice);
+    console.log("📝 Review count:", listingReviewsFromPage);
+
     const estimatedMonthlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
-        ? `$${Math.round(
-            (parseInt(listingReviewsFromPage) * avgPrice) / 12
-          ).toLocaleString()}`
+        ? `$${Math.round((parseInt(listingReviewsFromPage) * avgPrice) / 12).toLocaleString()}`
         : "N/A";
 
     const estimatedYearlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
-        ? `$${Math.round(
-            parseInt(listingReviewsFromPage) * avgPrice
-          ).toLocaleString()}`
+        ? `$${Math.round(parseInt(listingReviewsFromPage) * avgPrice).toLocaleString()}`
         : "N/A";
+
+    if (!avgPrice || listingReviewsFromPage === "N/A") {
+      console.log(
+        `⚠️ Missing data for revenue calculation — avgPrice: ${avgPrice} reviews: ${listingReviewsFromPage}`
+      );
+    }
 
     const demandScore = calculateDemandScore(
       estimatedYearlyRevenue,
