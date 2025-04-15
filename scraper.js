@@ -32,23 +32,33 @@ export async function scrapeEtsy(url) {
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
     const priceOptions = [];
+
     $("select option").each((_, el) => {
       const text = $(el).text().trim();
-      if (text && /^[\$€£]\d/.test(text)) priceOptions.push(text);
+      if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
     });
 
-    // 💵 Fallback: Try to pull visible prices on page if no <option> prices are found
+    // 🛠️ Fallback logic for price if not found in dropdowns
     if (priceOptions.length === 0) {
-      const fallbackText = $(".wt-text-title-03, .wt-text-strikethrough")
-        .map((_, el) => $(el).text().trim())
-        .get()
-        .filter((text) => text && /^[\$€£]\d/.test(text));
-      
-      if (fallbackText.length > 0) {
-        console.log("✅ Using fallback price elements:", fallbackText);
-        priceOptions.push(...fallbackText);
+      let fallbackPrice = $(".wt-text-title-03").first().text().trim();
+      if (!/[\$€£]\d/.test(fallbackPrice)) {
+        // Extra fallback: search body for lines that look like prices
+        const allText = $("body").text();
+        const possiblePrices = allText
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => /^[\$€£]\d/.test(line) && !line.toLowerCase().includes("views"));
+
+        if (possiblePrices.length > 0) {
+          fallbackPrice = possiblePrices[0];
+        }
+      }
+
+      if (fallbackPrice && /[\$€£]\d/.test(fallbackPrice)) {
+        console.log("✅ Using fallback price:", fallbackPrice);
+        priceOptions.push(fallbackPrice);
       } else {
-        console.warn("⚠️ No price found at all.");
+        console.log("⚠️ No valid fallback price found.");
       }
     }
 
