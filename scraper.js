@@ -4,16 +4,13 @@ import dotenv from "dotenv";
 import OpenAI from "openai";
 
 dotenv.config();
-
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 function calculateDemandScore(estimatedRevenue, reviews) {
   const revenue = parseInt(estimatedRevenue.replace(/[^\d]/g, "")) || 0;
   const reviewCount = parseInt(reviews) || 0;
-
-  const revenueScore = Math.min((revenue / 200000) * 50, 50);
-  const reviewScore = Math.min((reviewCount / 1000) * 50, 50);
-
+  const revenueScore = Math.min((revenue / 200000) * 50, 50); // 0–50 pts
+  const reviewScore = Math.min((reviewCount / 1000) * 50, 50); // 0–50 pts
   return Math.round(revenueScore + reviewScore);
 }
 
@@ -32,21 +29,22 @@ export async function scrapeEtsy(url) {
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
     const priceOptions = [];
-
     $("select option").each((_, el) => {
       const text = $(el).text().trim();
       if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
     });
 
-    // Fallback logic for listings without dropdowns or sales
+    // ✅ Primary fallback logic for single-price listings
     if (priceOptions.length === 0) {
-      const primaryPrice = $(".wt-text-title-03").first().text().trim();
-      const backupPrice = $(".wt-text-strikethrough").first().text().trim();
+      const rawBody = $("body").text();
+      const priceMatches = rawBody.match(/[\$€£]\s?\d+(?:\.\d{2})?/g);
+      const filtered = priceMatches
+        ? [...new Set(priceMatches.filter(p => /^[\$€£]/.test(p) && !p.includes("view")))]
+        : [];
 
-      const fallback = primaryPrice || backupPrice || "";
-      if (fallback) {
-        priceOptions.push(fallback);
-        console.log("✅ Using fallback price elements:", priceOptions);
+      if (filtered.length > 0) {
+        console.log("✅ Using fallback price elements:", filtered);
+        priceOptions.push(...filtered.slice(0, 3));
       } else {
         console.log("⚠️ No price found at all.");
       }
@@ -62,16 +60,14 @@ export async function scrapeEtsy(url) {
       } catch {}
     });
 
+    // ✅ Accurate "This item" review count
     let listingReviewsFromPage = "N/A";
     $('button[role="tab"]').each((_, el) => {
       const tabText = $(el).text().trim();
       const hasThisItem = tabText.startsWith("This item") || tabText.includes("This item");
-
       if (hasThisItem) {
         const rawNum = $(el).find("span").first().text().replace(/,/g, "").trim();
-        if (rawNum && /^\d+$/.test(rawNum)) {
-          listingReviewsFromPage = rawNum;
-        }
+        if (rawNum && /^\d+$/.test(rawNum)) listingReviewsFromPage = rawNum;
       }
     });
 
@@ -93,16 +89,10 @@ export async function scrapeEtsy(url) {
       })
       .filter((val) => val !== null);
 
-    console.log("💵 Raw price options:", priceOptions);
-    console.log("💲 Converted prices (normalized):", prices);
-
     const avgPrice =
       prices.length > 0
         ? prices.reduce((sum, p) => sum + p, 0) / prices.length
         : null;
-
-    console.log("🧮 Average price:", avgPrice);
-    console.log("📝 Review count:", listingReviewsFromPage);
 
     const estimatedMonthlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
@@ -113,12 +103,6 @@ export async function scrapeEtsy(url) {
       avgPrice && listingReviewsFromPage !== "N/A"
         ? `$${Math.round(parseInt(listingReviewsFromPage) * avgPrice).toLocaleString()}`
         : "N/A";
-
-    if (!avgPrice || listingReviewsFromPage === "N/A") {
-      console.log(
-        `⚠️ Missing data for revenue calculation — avgPrice: ${avgPrice} reviews: ${listingReviewsFromPage}`
-      );
-    }
 
     const demandScore = calculateDemandScore(
       estimatedYearlyRevenue,
@@ -195,7 +179,7 @@ export async function scrapeEtsy(url) {
       listingReviews: "N/A",
       estimatedRevenue: "N/A",
       estimatedMonthlyRevenue: "N/A",
-      demandScore: "N/A",
+      demandScore: 0,
       description: "N/A",
       category: "N/A",
       images: [],
