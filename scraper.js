@@ -48,43 +48,46 @@ export async function scrapeEtsy(url) {
 
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
-    const priceOptions = [];
-    $("select option").each((_, el) => {
-      const text = $(el).text().trim();
-      if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
-    });
-
-    if (priceOptions.length === 0) {
-      const salePrice = $(".wt-text-title-03").first().text().trim();
-      const originalPrice = $(".wt-text-strikethrough").first().text().trim();
-      const fallback = salePrice || originalPrice || "";
-      if (fallback) priceOptions.push(fallback);
-    }
-
     let prices = [];
     let displayPrices = [];
 
-    priceOptions.forEach((p) => {
-      const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
-      if (match) {
-        const val = parseFloat(match[1]);
-        if (val >= 5) {
-          prices.push(val);
-          displayPrices.push(`$${val.toFixed(2)}`);
-        }
-      }
-    });
+    try {
+      const priceOptions = [];
+      $("select option").each((_, el) => {
+        const text = $(el).text().trim();
+        if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
+      });
 
-    // ✅ Final fallback: extract prices from raw HTML
-    if (prices.length === 0) {
-      const rawFallbackPrices = extractFallbackPricesFromText(html);
-      rawFallbackPrices.forEach((price) => {
-        const val = parseFloat(price.replace(/[^\d.]/g, ""));
-        if (val) {
-          prices.push(val);
-          displayPrices.push(`$${val.toFixed(2)}`);
+      if (priceOptions.length === 0) {
+        const salePrice = $(".wt-text-title-03").first().text().trim();
+        const originalPrice = $(".wt-text-strikethrough").first().text().trim();
+        const fallback = salePrice || originalPrice || "";
+        if (fallback) priceOptions.push(fallback);
+      }
+
+      priceOptions.forEach((p) => {
+        const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
+        if (match) {
+          const val = parseFloat(match[1]);
+          if (val >= 5) {
+            prices.push(val);
+            displayPrices.push(`$${val.toFixed(2)}`);
+          }
         }
       });
+
+      if (prices.length === 0) {
+        const rawFallbackPrices = extractFallbackPricesFromText(html);
+        rawFallbackPrices.forEach((price) => {
+          const val = parseFloat(price.replace(/[^\d.]/g, ""));
+          if (val) {
+            prices.push(val);
+            displayPrices.push(`$${val.toFixed(2)}`);
+          }
+        });
+      }
+    } catch (err) {
+      console.log("❌ Price extraction error:", err.message);
     }
 
     let shopName = "N/A";
@@ -98,19 +101,32 @@ export async function scrapeEtsy(url) {
     });
 
     let listingReviewsFromPage = "N/A";
-    const reviewSelectors = [
-      () => $('button[role="tab"]').filter((_, el) => $(el).text().includes("This item")).find("span").first().text(),
-      () => $('div[data-review-count]').text(),
-      () => $('[data-review-count]').text()
-    ];
-    for (const getReview of reviewSelectors) {
-      try {
-        const rawNum = getReview().replace(/,/g, "").trim();
-        if (rawNum && /^\d+$/.test(rawNum)) {
-          listingReviewsFromPage = rawNum;
-          break;
+    try {
+      $('button[role="tab"]').each((_, el) => {
+        const tabText = $(el).text().trim();
+        if (tabText.includes("This item")) {
+          const rawNum = $(el).find("span").first().text().replace(/,/g, "").trim();
+          if (rawNum && /^\d+$/.test(rawNum)) {
+            listingReviewsFromPage = rawNum;
+          }
         }
-      } catch {}
+      });
+
+      if (listingReviewsFromPage === "N/A") {
+        const alt = $('[data-review-count]').text().replace(/,/g, "").trim();
+        if (alt && /^\d+$/.test(alt)) {
+          listingReviewsFromPage = alt;
+        }
+      }
+
+      if (listingReviewsFromPage === "N/A") {
+        const match = html.match(/"reviewCount":\s*(\d+)/);
+        if (match) {
+          listingReviewsFromPage = match[1];
+        }
+      }
+    } catch (e) {
+      console.log("❌ Failed to extract reviews:", e.message);
     }
 
     const rawDesc = $("[data-id='description-text']").text().trim();
@@ -152,6 +168,7 @@ export async function scrapeEtsy(url) {
       (async () => {
         let shopCreationYear = "N/A";
         let shopSales = "N/A";
+
         if (shopName && shopName !== "N/A") {
           try {
             const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
@@ -172,6 +189,7 @@ export async function scrapeEtsy(url) {
             console.error("❌ Failed to scrape about page:", err.message);
           }
         }
+
         return { shopCreationYear, shopSales };
       })(),
       (async () => {
@@ -182,6 +200,7 @@ export async function scrapeEtsy(url) {
             messages: [{ role: "user", content: prompt }],
             temperature: 0.7,
           });
+
           const rawTags = JSON.parse(aiRes.choices[0].message.content);
           return rawTags.filter((t) => typeof t === "string" && t.length <= 20);
         } catch (err) {
