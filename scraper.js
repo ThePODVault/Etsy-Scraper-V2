@@ -15,16 +15,16 @@ function calculateDemandScore(estimatedRevenue, reviews) {
   return Math.round(revenueScore + reviewScore);
 }
 
-function extractAllPricesFromText(text) {
+function extractFallbackPricesFromText(text) {
   const matches = text.match(/[\$€£]\d+(?:\.\d{2})?/g) || [];
-  const filtered = new Set();
-  for (const match of matches) {
-    const val = parseFloat(match.replace(/[^\d.]/g, ""));
+  const filtered = [];
+  for (const price of matches) {
+    const val = parseFloat(price.replace(/[^\d.]/g, ""));
     if (val >= 5 && val <= 1000) {
-      filtered.add(`$${val.toFixed(2)}`);
+      filtered.push(price);
     }
   }
-  return Array.from(filtered);
+  return [...new Set(filtered)];
 }
 
 export async function scrapeEtsy(url) {
@@ -48,11 +48,46 @@ export async function scrapeEtsy(url) {
 
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
-    // ✅ Grab all possible price text from HTML
-    const allText = $("body").text();
-    const displayPrices = extractAllPricesFromText(allText);
+    const priceOptions = [];
+    $("select option").each((_, el) => {
+      const text = $(el).text().trim();
+      if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
+    });
 
-    let prices = displayPrices.map(p => parseFloat(p.replace(/[^\d.]/g, "")));
+    if (priceOptions.length === 0) {
+      const salePrice = $(".wt-text-title-03").first().text().trim();
+      const originalPrice = $(".wt-text-strikethrough").first().text().trim();
+      const fallback = salePrice || originalPrice || "";
+      if (fallback) priceOptions.push(fallback);
+    }
+
+    let prices = [];
+    let displayPrices = [];
+
+    priceOptions.forEach((p) => {
+      const matches = p.match(/[\$€£]\d+(?:\.\d{2})?/g);
+      if (matches) {
+        matches.forEach((price) => {
+          const val = parseFloat(price.replace(/[^\d.]/g, ""));
+          if (val >= 5) {
+            prices.push(val);
+            displayPrices.push(`$${val.toFixed(2)}`);
+          }
+        });
+      }
+    });
+
+    // ✅ Final fallback scan for raw prices in the HTML body
+    if (prices.length === 0) {
+      const rawFallbackPrices = extractFallbackPricesFromText(html);
+      rawFallbackPrices.forEach((price) => {
+        const val = parseFloat(price.replace(/[^\d.]/g, ""));
+        if (val) {
+          prices.push(val);
+          displayPrices.push(`$${val.toFixed(2)}`);
+        }
+      });
+    }
 
     let shopName = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
@@ -86,9 +121,10 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    const avgPrice = prices.length > 0
-      ? prices.reduce((sum, p) => sum + p, 0) / prices.length
-      : null;
+    const avgPrice =
+      prices.length > 0
+        ? prices.reduce((sum, p) => sum + p, 0) / prices.length
+        : null;
 
     const estimatedMonthlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
@@ -114,22 +150,28 @@ export async function scrapeEtsy(url) {
       (async () => {
         let shopCreationYear = "N/A";
         let shopSales = "N/A";
+
         if (shopName && shopName !== "N/A") {
           try {
             const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
             const aboutRes = await axios.get(proxy(aboutUrl));
             const $$ = cheerio.load(aboutRes.data);
             const bodyText = $$.text();
+
             const yearMatch =
               bodyText.match(/opened in (\d{4})/i) ||
               bodyText.match(/on etsy since (\d{4})/i);
             if (yearMatch) shopCreationYear = yearMatch[1];
+
             const salesMatch = bodyText.match(/([\d,]+)\s+sales/i);
-            if (salesMatch) shopSales = salesMatch[1].replace(/,/g, "");
+            if (salesMatch) {
+              shopSales = salesMatch[1].replace(/,/g, "");
+            }
           } catch (err) {
             console.error("❌ Failed to scrape about page:", err.message);
           }
         }
+
         return { shopCreationYear, shopSales };
       })(),
       (async () => {
@@ -140,6 +182,7 @@ export async function scrapeEtsy(url) {
             messages: [{ role: "user", content: prompt }],
             temperature: 0.7,
           });
+
           const rawTags = JSON.parse(aiRes.choices[0].message.content);
           return rawTags.filter((t) => typeof t === "string" && t.length <= 20);
         } catch (err) {
