@@ -48,7 +48,6 @@ export async function scrapeEtsy(url) {
 
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
-    // ✅ Combine price parsing and fallback
     const priceOptions = [];
     $("select option").each((_, el) => {
       const text = $(el).text().trim();
@@ -76,7 +75,7 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // ✅ Final fallback scan for raw prices in the HTML
+    // ✅ Final fallback: extract prices from raw HTML
     if (prices.length === 0) {
       const rawFallbackPrices = extractFallbackPricesFromText(html);
       rawFallbackPrices.forEach((price) => {
@@ -99,15 +98,20 @@ export async function scrapeEtsy(url) {
     });
 
     let listingReviewsFromPage = "N/A";
-    $('button[role="tab"]').each((_, el) => {
-      const tabText = $(el).text().trim();
-      if (tabText.startsWith("This item") || tabText.includes("This item")) {
-        const rawNum = $(el).find("span").first().text().replace(/,/g, "").trim();
+    const reviewSelectors = [
+      () => $('button[role="tab"]').filter((_, el) => $(el).text().includes("This item")).find("span").first().text(),
+      () => $('div[data-review-count]').text(),
+      () => $('[data-review-count]').text()
+    ];
+    for (const getReview of reviewSelectors) {
+      try {
+        const rawNum = getReview().replace(/,/g, "").trim();
         if (rawNum && /^\d+$/.test(rawNum)) {
           listingReviewsFromPage = rawNum;
+          break;
         }
-      }
-    });
+      } catch {}
+    }
 
     const rawDesc = $("[data-id='description-text']").text().trim();
     const description = rawDesc || "N/A";
@@ -148,7 +152,6 @@ export async function scrapeEtsy(url) {
       (async () => {
         let shopCreationYear = "N/A";
         let shopSales = "N/A";
-
         if (shopName && shopName !== "N/A") {
           try {
             const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
@@ -169,7 +172,6 @@ export async function scrapeEtsy(url) {
             console.error("❌ Failed to scrape about page:", err.message);
           }
         }
-
         return { shopCreationYear, shopSales };
       })(),
       (async () => {
@@ -180,7 +182,6 @@ export async function scrapeEtsy(url) {
             messages: [{ role: "user", content: prompt }],
             temperature: 0.7,
           });
-
           const rawTags = JSON.parse(aiRes.choices[0].message.content);
           return rawTags.filter((t) => typeof t === "string" && t.length <= 20);
         } catch (err) {
