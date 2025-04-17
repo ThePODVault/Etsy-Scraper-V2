@@ -19,9 +19,11 @@ function extractFallbackPricesFromText(text) {
   const matches = text.match(/[\$€£]\d+(?:\.\d{2})?/g) || [];
   const filtered = [];
   for (const price of matches) {
-    const val = parseFloat(price.replace(/[^\d.]/g, ""));
-    if (val >= 5 && val <= 1000) {
-      filtered.push(price);
+    if (!price.includes("views")) {
+      const val = parseFloat(price.replace(/[^\d.]/g, ""));
+      if (val >= 5 && val <= 1000) {
+        filtered.push(price);
+      }
     }
   }
   return [...new Set(filtered)];
@@ -49,45 +51,44 @@ export async function scrapeEtsy(url) {
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
     const priceOptions = [];
+
+    // ✅ Dropdown-based prices
     $("select option").each((_, el) => {
       const text = $(el).text().trim();
-      if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
+      if (text && /[\$€£]\d/.test(text)) {
+        priceOptions.push(text);
+      }
     });
 
+    // ✅ Static price (no dropdown)
     if (priceOptions.length === 0) {
-      const salePrice = $(".wt-text-title-03").first().text().trim();
-      const originalPrice = $(".wt-text-strikethrough").first().text().trim();
-      const fallback = salePrice || originalPrice || "";
-      if (fallback) priceOptions.push(fallback);
+      $(".wt-text-title-03, .wt-price, .wt-screen-reader-only").each((_, el) => {
+        const text = $(el).text().trim();
+        if (text && /^[\$€£]\d/.test(text)) {
+          priceOptions.push(text);
+        }
+      });
+    }
+
+    // ✅ Final fallback for price anywhere in HTML
+    if (priceOptions.length === 0) {
+      const fallbackPrices = extractFallbackPricesFromText(html);
+      priceOptions.push(...fallbackPrices);
     }
 
     let prices = [];
     let displayPrices = [];
 
     priceOptions.forEach((p) => {
-      const matches = p.match(/[\$€£]\d+(?:\.\d{2})?/g);
-      if (matches) {
-        matches.forEach((price) => {
-          const val = parseFloat(price.replace(/[^\d.]/g, ""));
-          if (val >= 5) {
-            prices.push(val);
-            displayPrices.push(`$${val.toFixed(2)}`);
-          }
-        });
-      }
-    });
-
-    // ✅ Final fallback scan for raw prices in the HTML body
-    if (prices.length === 0) {
-      const rawFallbackPrices = extractFallbackPricesFromText(html);
-      rawFallbackPrices.forEach((price) => {
-        const val = parseFloat(price.replace(/[^\d.]/g, ""));
-        if (val) {
+      const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
+      if (match) {
+        const val = parseFloat(match[1]);
+        if (val >= 5) {
           prices.push(val);
           displayPrices.push(`$${val.toFixed(2)}`);
         }
-      });
-    }
+      }
+    });
 
     let shopName = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
