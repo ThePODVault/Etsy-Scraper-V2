@@ -37,6 +37,7 @@ export async function scrapeEtsy(url) {
 
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
+    // ✅ Combine price parsing and formatting
     const priceOptions = [];
     $("select option").each((_, el) => {
       const text = $(el).text().trim();
@@ -49,6 +50,19 @@ export async function scrapeEtsy(url) {
       const fallback = salePrice || originalPrice || "";
       if (fallback) priceOptions.push(fallback);
     }
+
+    const prices = [];
+    const displayPrices = [];
+    priceOptions.forEach((p) => {
+      const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
+      if (match) {
+        const val = parseFloat(match[1]);
+        if (val >= 5) {
+          prices.push(val);
+          displayPrices.push(`$${val.toFixed(2)}`);
+        }
+      }
+    });
 
     let shopName = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
@@ -82,13 +96,6 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    const prices = priceOptions
-      .map((p) => {
-        const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
-        return match ? parseFloat(match[1]) : null;
-      })
-      .filter((val) => val !== null && val >= 5);
-
     const avgPrice =
       prices.length > 0
         ? prices.reduce((sum, p) => sum + p, 0) / prices.length
@@ -114,48 +121,63 @@ export async function scrapeEtsy(url) {
       $("a[href*='/category/']").last().text().trim() ||
       "N/A";
 
-    let shopCreationYear = "N/A";
-    let shopSales = "N/A";
+    // ✅ Run about page + tags in parallel
+    const [aboutData, tagData] = await Promise.allSettled([
+      (async () => {
+        let shopCreationYear = "N/A";
+        let shopSales = "N/A";
 
-    if (shopName !== "N/A") {
-      try {
-        const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
-        const aboutRes = await axios.get(proxy(aboutUrl));
-        const $$ = cheerio.load(aboutRes.data);
-        const bodyText = $$.text();
+        if (shopName && shopName !== "N/A") {
+          try {
+            const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
+            const aboutRes = await axios.get(proxy(aboutUrl));
+            const $$ = cheerio.load(aboutRes.data);
+            const bodyText = $$.text();
 
-        const yearMatch =
-          bodyText.match(/opened in (\d{4})/i) ||
-          bodyText.match(/on etsy since (\d{4})/i);
-        if (yearMatch) shopCreationYear = yearMatch[1];
+            const yearMatch =
+              bodyText.match(/opened in (\d{4})/i) ||
+              bodyText.match(/on etsy since (\d{4})/i);
+            if (yearMatch) shopCreationYear = yearMatch[1];
 
-        const salesMatch = bodyText.match(/([\d,]+)\s+sales/i);
-        if (salesMatch) {
-          shopSales = salesMatch[1].replace(/,/g, "");
+            const salesMatch = bodyText.match(/([\d,]+)\s+sales/i);
+            if (salesMatch) {
+              shopSales = salesMatch[1].replace(/,/g, "");
+            }
+          } catch (err) {
+            console.error("❌ Failed to scrape about page:", err.message);
+          }
         }
-      } catch (err) {
-        console.error("❌ Failed to scrape about page:", err.message);
-      }
-    }
 
-    let tags = [];
-    try {
-      const prompt = `Extract 13 high-converting Etsy tags from this listing title and description. Each tag must be 1–20 characters. Return them as a JSON array only:\n\nTitle: ${title}\n\nDescription: ${description}`;
-      const aiRes = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.7,
-      });
+        return { shopCreationYear, shopSales };
+      })(),
+      (async () => {
+        try {
+          const prompt = `Extract 13 high-converting Etsy tags from this listing title and description. Each tag must be 1–20 characters. Return them as a JSON array only:\n\nTitle: ${title}\n\nDescription: ${description}`;
+          const aiRes = await openai.chat.completions.create({
+            model: "gpt-3.5-turbo",
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.7,
+          });
 
-      const rawTags = JSON.parse(aiRes.choices[0].message.content);
-      tags = rawTags.filter((t) => typeof t === "string" && t.length <= 20);
-    } catch (err) {
-      console.error("❌ Failed to generate tags:", err.message);
-    }
+          const rawTags = JSON.parse(aiRes.choices[0].message.content);
+          return rawTags.filter((t) => typeof t === "string" && t.length <= 20);
+        } catch (err) {
+          console.error("❌ Failed to generate tags:", err.message);
+          return [];
+        }
+      })(),
+    ]);
+
+    const shopCreationYear =
+      aboutData.status === "fulfilled" ? aboutData.value.shopCreationYear : "N/A";
+    const shopSales =
+      aboutData.status === "fulfilled" ? aboutData.value.shopSales : "N/A";
+
+    const tags = tagData.status === "fulfilled" ? tagData.value : [];
 
     return {
       title,
-      price: prices.map((p) => `$${p.toFixed(2)}`) || "N/A",
+      price: displayPrices.length ? displayPrices : "N/A",
       shopName,
       rating,
       listingReviews: listingReviewsFromPage,
