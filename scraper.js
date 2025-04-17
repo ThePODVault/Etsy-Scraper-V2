@@ -10,21 +10,11 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 function calculateDemandScore(estimatedRevenue, reviews) {
   const revenue = parseInt(estimatedRevenue.replace(/[^\d]/g, "")) || 0;
   const reviewCount = parseInt(reviews) || 0;
+
   const revenueScore = Math.min((revenue / 200000) * 50, 50);
   const reviewScore = Math.min((reviewCount / 1000) * 50, 50);
-  return Math.round(revenueScore + reviewScore);
-}
 
-function extractFallbackPricesFromText(text) {
-  const matches = text.match(/[\$€£]\d+(?:\.\d{2})?/g) || [];
-  const filtered = [];
-  for (const price of matches) {
-    const val = parseFloat(price.replace(/[^\d.]/g, ""));
-    if (val >= 5 && val <= 1000) {
-      filtered.push(price);
-    }
-  }
-  return [...new Set(filtered)];
+  return Math.round(revenueScore + reviewScore);
 }
 
 export async function scrapeEtsy(url) {
@@ -36,8 +26,7 @@ export async function scrapeEtsy(url) {
 
   try {
     const response = await axios.get(proxy(url));
-    const html = response.data;
-    const $ = cheerio.load(html);
+    const $ = cheerio.load(response.data);
 
     let title = $("h1[data-buy-box-listing-title]").text().trim();
     if (!title) {
@@ -54,16 +43,25 @@ export async function scrapeEtsy(url) {
       if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
     });
 
+    // ✅ Improved fallback: Scan all visible text nodes for clean currency values
     if (priceOptions.length === 0) {
-      const salePrice = $(".wt-text-title-03").first().text().trim();
-      const originalPrice = $(".wt-text-strikethrough").first().text().trim();
-      const fallback = salePrice || originalPrice || "";
+      let salePrice = $(".wt-text-title-03").first().text().trim();
+      let originalPrice = $(".wt-text-strikethrough").first().text().trim();
+
+      const fallbackPrices = [];
+      $("body *").each((_, el) => {
+        const text = $(el).text().trim();
+        if (/^[\$€£]\d+(?:\.\d{2})?$/.test(text)) {
+          fallbackPrices.push(text);
+        }
+      });
+
+      const fallback = salePrice || originalPrice || fallbackPrices[0] || "";
       if (fallback) priceOptions.push(fallback);
     }
 
-    let prices = [];
-    let displayPrices = [];
-
+    const prices = [];
+    const displayPrices = [];
     priceOptions.forEach((p) => {
       const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
       if (match) {
@@ -74,18 +72,6 @@ export async function scrapeEtsy(url) {
         }
       }
     });
-
-    // Final fallback: scan entire HTML for standalone price strings
-    if (prices.length === 0) {
-      const rawFallbackPrices = extractFallbackPricesFromText(html);
-      rawFallbackPrices.forEach((price) => {
-        const val = parseFloat(price.replace(/[^\d.]/g, ""));
-        if (val) {
-          prices.push(val);
-          displayPrices.push(`$${val.toFixed(2)}`);
-        }
-      });
-    }
 
     let shopName = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
@@ -119,9 +105,10 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    const avgPrice = prices.length > 0
-      ? prices.reduce((sum, p) => sum + p, 0) / prices.length
-      : null;
+    const avgPrice =
+      prices.length > 0
+        ? prices.reduce((sum, p) => sum + p, 0) / prices.length
+        : null;
 
     const estimatedMonthlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
