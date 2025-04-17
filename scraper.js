@@ -48,7 +48,6 @@ export async function scrapeEtsy(url) {
 
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
-    // ✅ Combine price parsing and fallback
     const priceOptions = [];
     $("select option").each((_, el) => {
       const text = $(el).text().trim();
@@ -76,7 +75,7 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // ✅ Final fallback scan for raw prices in the HTML
+    // Final fallback: scan entire HTML for standalone price strings
     if (prices.length === 0) {
       const rawFallbackPrices = extractFallbackPricesFromText(html);
       rawFallbackPrices.forEach((price) => {
