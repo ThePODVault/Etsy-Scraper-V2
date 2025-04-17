@@ -19,14 +19,186 @@ function extractFallbackPricesFromText(text) {
   const matches = text.match(/[\$€£]\d+(?:\.\d{2})?/g) || [];
   const filtered = [];
   for (const price of matches) {
-    if (!price.includes("views")) {
-      const val = parseFloat(price.replace(/[^\d.]/g, ""));
-      if (val >= 5 && val <= 1000) {
-        filtered.push(price);
-      }
+    const val = parseFloat(price.replace(/[^\d.]/g, ""));
+    if (val >= 5 && val <= 1000) {
+      filtered.push(price);
     }
   }
   return [...new Set(filtered)];
+}
+
+async function attemptScrape(url, proxy, attempt = 1) {
+  const response = await axios.get(proxy(url));
+  const html = response.data;
+  const $ = cheerio.load(html);
+
+  let title = $("h1[data-buy-box-listing-title]").text().trim();
+  if (!title) {
+    const ogTitle = $('meta[property="og:title"]').attr("content");
+    if (ogTitle) title = ogTitle.trim();
+  }
+  if (!title) title = "N/A";
+
+  const rating = $("input[name='rating']").attr("value") || "N/A";
+
+  const priceOptions = [];
+  $("select option").each((_, el) => {
+    const text = $(el).text().trim();
+    if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
+  });
+
+  if (priceOptions.length === 0) {
+    const salePrice = $(".wt-text-title-03").first().text().trim();
+    const originalPrice = $(".wt-text-strikethrough").first().text().trim();
+    const fallback = salePrice || originalPrice || "";
+    if (fallback) priceOptions.push(fallback);
+  }
+
+  let prices = [];
+  let displayPrices = [];
+
+  priceOptions.forEach((p) => {
+    const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
+    if (match) {
+      const val = parseFloat(match[1]);
+      if (val >= 5) {
+        prices.push(val);
+        displayPrices.push(`$${val.toFixed(2)}`);
+      }
+    }
+  });
+
+  if (prices.length === 0) {
+    const rawFallbackPrices = extractFallbackPricesFromText(html);
+    rawFallbackPrices.forEach((price) => {
+      const val = parseFloat(price.replace(/[^\d.]/g, ""));
+      if (val) {
+        prices.push(val);
+        displayPrices.push(`$${val.toFixed(2)}`);
+      }
+    });
+  }
+
+  let listingReviewsFromPage = "N/A";
+  $('button[role="tab"]').each((_, el) => {
+    const tabText = $(el).text().trim();
+    if (tabText.startsWith("This item") || tabText.includes("This item")) {
+      const rawNum = $(el).find("span").first().text().replace(/,/g, "").trim();
+      if (rawNum && /^\d+$/.test(rawNum)) {
+        listingReviewsFromPage = rawNum;
+      }
+    }
+  });
+
+  const rawDesc = $("[data-id='description-text']").text().trim();
+  const description = rawDesc || "N/A";
+
+  const images = [];
+  $("img").each((_, el) => {
+    const src = $(el).attr("src") || $(el).attr("data-src");
+    if (src && src.includes("etsystatic")) {
+      images.push(src.split("?")[0]);
+    }
+  });
+
+  const avgPrice =
+    prices.length > 0 ? prices.reduce((sum, p) => sum + p, 0) / prices.length : null;
+
+  const estimatedMonthlyRevenue =
+    avgPrice && listingReviewsFromPage !== "N/A"
+      ? `$${Math.round((parseInt(listingReviewsFromPage) * avgPrice) / 12).toLocaleString()}`
+      : "N/A";
+
+  const estimatedYearlyRevenue =
+    avgPrice && listingReviewsFromPage !== "N/A"
+      ? `$${Math.round(parseInt(listingReviewsFromPage) * avgPrice).toLocaleString()}`
+      : "N/A";
+
+  const demandScore = calculateDemandScore(
+    estimatedYearlyRevenue,
+    listingReviewsFromPage
+  );
+
+  let shopName = "N/A";
+  $("script[type='application/ld+json']").each((_, el) => {
+    try {
+      const json = JSON.parse($(el).html());
+      if (json["@type"] === "Product" && json?.brand?.name) {
+        shopName = json.brand.name;
+      }
+    } catch {}
+  });
+
+  const category =
+    $("a[href*='/c/']").last().text().trim() ||
+    $("a[href*='/category/']").last().text().trim() ||
+    "N/A";
+
+  const [aboutData, tagData] = await Promise.allSettled([
+    (async () => {
+      let shopCreationYear = "N/A";
+      let shopSales = "N/A";
+      if (shopName && shopName !== "N/A") {
+        try {
+          const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
+          const aboutRes = await axios.get(proxy(aboutUrl));
+          const $$ = cheerio.load(aboutRes.data);
+          const bodyText = $$.text();
+
+          const yearMatch =
+            bodyText.match(/opened in (\d{4})/i) ||
+            bodyText.match(/on etsy since (\d{4})/i);
+          if (yearMatch) shopCreationYear = yearMatch[1];
+
+          const salesMatch = bodyText.match(/([\d,]+)\s+sales/i);
+          if (salesMatch) {
+            shopSales = salesMatch[1].replace(/,/g, "");
+          }
+        } catch (err) {
+          console.error("❌ Failed to scrape about page:", err.message);
+        }
+      }
+      return { shopCreationYear, shopSales };
+    })(),
+    (async () => {
+      try {
+        const prompt = `Extract 13 high-converting Etsy tags from this listing title and description. Each tag must be 1–20 characters. Return them as a JSON array only:\n\nTitle: ${title}\n\nDescription: ${description}`;
+        const aiRes = await openai.chat.completions.create({
+          model: "gpt-3.5-turbo",
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.7,
+        });
+        const rawTags = JSON.parse(aiRes.choices[0].message.content);
+        return rawTags.filter((t) => typeof t === "string" && t.length <= 20);
+      } catch (err) {
+        console.error("❌ Failed to generate tags:", err.message);
+        return [];
+      }
+    })(),
+  ]);
+
+  const shopCreationYear =
+    aboutData.status === "fulfilled" ? aboutData.value.shopCreationYear : "N/A";
+  const shopSales =
+    aboutData.status === "fulfilled" ? aboutData.value.shopSales : "N/A";
+  const tags = tagData.status === "fulfilled" ? tagData.value : [];
+
+  return {
+    title,
+    price: displayPrices.length ? displayPrices : "N/A",
+    shopName,
+    rating,
+    listingReviews: listingReviewsFromPage,
+    estimatedRevenue: estimatedYearlyRevenue,
+    estimatedMonthlyRevenue,
+    demandScore,
+    description,
+    category,
+    images: [...new Set(images)],
+    shopCreationYear,
+    shopSales,
+    tags,
+  };
 }
 
 export async function scrapeEtsy(url) {
@@ -36,203 +208,34 @@ export async function scrapeEtsy(url) {
   const proxy = (url) =>
     `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
 
-  try {
-    const response = await axios.get(proxy(url));
-    const html = response.data;
-    const $ = cheerio.load(html);
-
-    let title = $("h1[data-buy-box-listing-title]").text().trim();
-    if (!title) {
-      const ogTitle = $('meta[property="og:title"]').attr("content");
-      if (ogTitle) title = ogTitle.trim();
+  for (let i = 0; i < 3; i++) {
+    const data = await attemptScrape(url, proxy, i + 1);
+    if (
+      data.price !== "N/A" &&
+      data.listingReviews !== "N/A" &&
+      Array.isArray(data.price) &&
+      data.price.length > 0
+    ) {
+      return data;
     }
-    if (!title) title = "N/A";
-
-    const rating = $("input[name='rating']").attr("value") || "N/A";
-
-    const priceOptions = [];
-
-    // ✅ Dropdown-based prices
-    $("select option").each((_, el) => {
-      const text = $(el).text().trim();
-      if (text && /[\$€£]\d/.test(text)) {
-        priceOptions.push(text);
-      }
-    });
-
-    // ✅ Static price (no dropdown)
-    if (priceOptions.length === 0) {
-      $(".wt-text-title-03, .wt-price, .wt-screen-reader-only").each((_, el) => {
-        const text = $(el).text().trim();
-        if (text && /^[\$€£]\d/.test(text)) {
-          priceOptions.push(text);
-        }
-      });
-    }
-
-    // ✅ Final fallback for price anywhere in HTML
-    if (priceOptions.length === 0) {
-      const fallbackPrices = extractFallbackPricesFromText(html);
-      priceOptions.push(...fallbackPrices);
-    }
-
-    let prices = [];
-    let displayPrices = [];
-
-    priceOptions.forEach((p) => {
-      const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
-      if (match) {
-        const val = parseFloat(match[1]);
-        if (val >= 5) {
-          prices.push(val);
-          displayPrices.push(`$${val.toFixed(2)}`);
-        }
-      }
-    });
-
-    let shopName = "N/A";
-    $("script[type='application/ld+json']").each((_, el) => {
-      try {
-        const json = JSON.parse($(el).html());
-        if (json["@type"] === "Product" && json?.brand?.name) {
-          shopName = json.brand.name;
-        }
-      } catch {}
-    });
-
-    let listingReviewsFromPage = "N/A";
-    $('button[role="tab"]').each((_, el) => {
-      const tabText = $(el).text().trim();
-      if (tabText.startsWith("This item") || tabText.includes("This item")) {
-        const rawNum = $(el).find("span").first().text().replace(/,/g, "").trim();
-        if (rawNum && /^\d+$/.test(rawNum)) {
-          listingReviewsFromPage = rawNum;
-        }
-      }
-    });
-
-    const rawDesc = $("[data-id='description-text']").text().trim();
-    const description = rawDesc || "N/A";
-
-    const images = [];
-    $("img").each((_, el) => {
-      const src = $(el).attr("src") || $(el).attr("data-src");
-      if (src && src.includes("etsystatic")) {
-        images.push(src.split("?")[0]);
-      }
-    });
-
-    const avgPrice =
-      prices.length > 0
-        ? prices.reduce((sum, p) => sum + p, 0) / prices.length
-        : null;
-
-    const estimatedMonthlyRevenue =
-      avgPrice && listingReviewsFromPage !== "N/A"
-        ? `$${Math.round((parseInt(listingReviewsFromPage) * avgPrice) / 12).toLocaleString()}`
-        : "N/A";
-
-    const estimatedYearlyRevenue =
-      avgPrice && listingReviewsFromPage !== "N/A"
-        ? `$${Math.round(parseInt(listingReviewsFromPage) * avgPrice).toLocaleString()}`
-        : "N/A";
-
-    const demandScore = calculateDemandScore(
-      estimatedYearlyRevenue,
-      listingReviewsFromPage
-    );
-
-    const category =
-      $("a[href*='/c/']").last().text().trim() ||
-      $("a[href*='/category/']").last().text().trim() ||
-      "N/A";
-
-    const [aboutData, tagData] = await Promise.allSettled([
-      (async () => {
-        let shopCreationYear = "N/A";
-        let shopSales = "N/A";
-
-        if (shopName && shopName !== "N/A") {
-          try {
-            const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
-            const aboutRes = await axios.get(proxy(aboutUrl));
-            const $$ = cheerio.load(aboutRes.data);
-            const bodyText = $$.text();
-
-            const yearMatch =
-              bodyText.match(/opened in (\d{4})/i) ||
-              bodyText.match(/on etsy since (\d{4})/i);
-            if (yearMatch) shopCreationYear = yearMatch[1];
-
-            const salesMatch = bodyText.match(/([\d,]+)\s+sales/i);
-            if (salesMatch) {
-              shopSales = salesMatch[1].replace(/,/g, "");
-            }
-          } catch (err) {
-            console.error("❌ Failed to scrape about page:", err.message);
-          }
-        }
-
-        return { shopCreationYear, shopSales };
-      })(),
-      (async () => {
-        try {
-          const prompt = `Extract 13 high-converting Etsy tags from this listing title and description. Each tag must be 1–20 characters. Return them as a JSON array only:\n\nTitle: ${title}\n\nDescription: ${description}`;
-          const aiRes = await openai.chat.completions.create({
-            model: "gpt-3.5-turbo",
-            messages: [{ role: "user", content: prompt }],
-            temperature: 0.7,
-          });
-
-          const rawTags = JSON.parse(aiRes.choices[0].message.content);
-          return rawTags.filter((t) => typeof t === "string" && t.length <= 20);
-        } catch (err) {
-          console.error("❌ Failed to generate tags:", err.message);
-          return [];
-        }
-      })(),
-    ]);
-
-    const shopCreationYear =
-      aboutData.status === "fulfilled" ? aboutData.value.shopCreationYear : "N/A";
-    const shopSales =
-      aboutData.status === "fulfilled" ? aboutData.value.shopSales : "N/A";
-
-    const tags = tagData.status === "fulfilled" ? tagData.value : [];
-
-    return {
-      title,
-      price: displayPrices.length ? displayPrices : "N/A",
-      shopName,
-      rating,
-      listingReviews: listingReviewsFromPage,
-      estimatedRevenue: estimatedYearlyRevenue,
-      estimatedMonthlyRevenue,
-      demandScore,
-      description,
-      category,
-      images: [...new Set(images)],
-      shopCreationYear,
-      shopSales,
-      tags,
-    };
-  } catch (err) {
-    console.error("❌ Scraping error:", err.message);
-    return {
-      title: "N/A",
-      price: "N/A",
-      shopName: "N/A",
-      rating: "N/A",
-      listingReviews: "N/A",
-      estimatedRevenue: "N/A",
-      estimatedMonthlyRevenue: "N/A",
-      demandScore: 0,
-      description: "N/A",
-      category: "N/A",
-      images: [],
-      shopCreationYear: "N/A",
-      shopSales: "N/A",
-      tags: [],
-    };
+    console.warn(`⚠️ Retry ${i + 1}: Incomplete data. Retrying...`);
   }
+
+  console.error("❌ Final scrape attempt failed. Returning fallback response.");
+  return {
+    title: "N/A",
+    price: "N/A",
+    shopName: "N/A",
+    rating: "N/A",
+    listingReviews: "N/A",
+    estimatedRevenue: "N/A",
+    estimatedMonthlyRevenue: "N/A",
+    demandScore: 0,
+    description: "N/A",
+    category: "N/A",
+    images: [],
+    shopCreationYear: "N/A",
+    shopSales: "N/A",
+    tags: [],
+  };
 }
