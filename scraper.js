@@ -48,7 +48,6 @@ export async function scrapeEtsy(url) {
 
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
-    // ✅ Combine price parsing and fallback
     const priceOptions = [];
     $("select option").each((_, el) => {
       const text = $(el).text().trim();
@@ -76,7 +75,6 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // ✅ Final fallback scan for raw prices in the HTML
     if (prices.length === 0) {
       const rawFallbackPrices = extractFallbackPricesFromText(html);
       rawFallbackPrices.forEach((price) => {
@@ -98,13 +96,17 @@ export async function scrapeEtsy(url) {
       } catch {}
     });
 
-    // ✅ Updated logic: listing-specific reviews only
+    // ✅ NEW: Extract only listing-specific reviews ("This item:")
     let listingReviewsFromPage = "N/A";
-    const reviewSpan = $('span:contains("reviews for this item")').text();
-    const reviewMatch = reviewSpan.match(/(\d[\d,]*)/);
-    if (reviewMatch) {
-      listingReviewsFromPage = reviewMatch[1].replace(/,/g, "").trim();
-    }
+    $('span').each((_, el) => {
+      const text = $(el).text().trim();
+      if (text.startsWith("This item:")) {
+        const match = text.match(/This item:\s+(\d+)\s+reviews/i);
+        if (match) {
+          listingReviewsFromPage = match[1];
+        }
+      }
+    });
 
     const rawDesc = $("[data-id='description-text']").text().trim();
     const description = rawDesc || "N/A";
