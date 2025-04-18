@@ -96,15 +96,12 @@ export async function scrapeEtsy(url) {
       } catch {}
     });
 
-    // ✅ NEW: Extract only listing-specific reviews ("This item:")
+    // ✅ Updated: Extract listing-specific reviews only
     let listingReviewsFromPage = "N/A";
-    $('span').each((_, el) => {
-      const text = $(el).text().trim();
-      if (text.startsWith("This item:")) {
-        const match = text.match(/This item:\s+(\d+)\s+reviews/i);
-        if (match) {
-          listingReviewsFromPage = match[1];
-        }
+    $('#same-listing-reviews-tab span.wt-badge').each((_, el) => {
+      const reviewText = $(el).text().replace(/[^0-9]/g, "").trim();
+      if (reviewText && /^\d+$/.test(reviewText)) {
+        listingReviewsFromPage = reviewText;
       }
     });
 
