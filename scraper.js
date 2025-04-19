@@ -7,12 +7,16 @@ dotenv.config();
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-function calculateDemandScore(estimatedRevenue, reviews) {
+function calculateDemandScore(estimatedRevenue, reviews, favorites) {
   const revenue = parseInt(estimatedRevenue.replace(/[^\d]/g, "")) || 0;
   const reviewCount = parseInt(reviews) || 0;
-  const revenueScore = Math.min((revenue / 200000) * 50, 50);
-  const reviewScore = Math.min((reviewCount / 1000) * 50, 50);
-  return Math.round(revenueScore + reviewScore);
+  const favCount = parseInt(favorites) || 0;
+
+  const revenueScore = Math.min((revenue / 200000) * 40, 40);
+  const reviewScore = Math.min((reviewCount / 1000) * 40, 40);
+  const favoriteScore = Math.min((favCount / 1000) * 20, 20);
+
+  return Math.round(revenueScore + reviewScore + favoriteScore);
 }
 
 function extractFallbackPricesFromText(text) {
@@ -107,14 +111,12 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // ✅ Extract favorites from meta description
-    let favorites = "N/A";
+    // ✅ Favorites extraction
+    let favoriteCount = "N/A";
     const metaDesc = $('meta[name="description"]').attr("content");
     if (metaDesc) {
-      const favMatch = metaDesc.match(/has (\d[\d,]*) favorites/i);
-      if (favMatch && favMatch[1]) {
-        favorites = favMatch[1].replace(/,/g, '');
-      }
+      const match = metaDesc.match(/has\s([\d,]+)\sfavorites/i);
+      if (match) favoriteCount = match[1].replace(/,/g, "");
     }
 
     const rawDesc = $("[data-id='description-text']").text().trim();
@@ -144,7 +146,8 @@ export async function scrapeEtsy(url) {
 
     const demandScore = calculateDemandScore(
       estimatedYearlyRevenue,
-      listingReviewsFromPage
+      listingReviewsFromPage,
+      favoriteCount
     );
 
     const category =
@@ -211,7 +214,7 @@ export async function scrapeEtsy(url) {
       shopName,
       rating,
       listingReviews: listingReviewsFromPage,
-      favorites,
+      favorites: favoriteCount,
       estimatedRevenue: estimatedYearlyRevenue,
       estimatedMonthlyRevenue,
       demandScore,
