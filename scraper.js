@@ -96,14 +96,26 @@ export async function scrapeEtsy(url) {
       } catch {}
     });
 
-    // ✅ Updated: Extract listing-specific reviews only
     let listingReviewsFromPage = "N/A";
-    $('#same-listing-reviews-tab span.wt-badge').each((_, el) => {
-      const reviewText = $(el).text().replace(/[^0-9]/g, "").trim();
-      if (reviewText && /^\d+$/.test(reviewText)) {
-        listingReviewsFromPage = reviewText;
+    $('button[role="tab"]').each((_, el) => {
+      const tabText = $(el).text().trim();
+      if (tabText.startsWith("This item") || tabText.includes("This item")) {
+        const rawNum = $(el).find("span").first().text().replace(/,/g, "").trim();
+        if (rawNum && /^\d+$/.test(rawNum)) {
+          listingReviewsFromPage = rawNum;
+        }
       }
     });
+
+    // ✅ Extract favorites from meta description
+    let favorites = "N/A";
+    const metaDesc = $('meta[name="description"]').attr("content");
+    if (metaDesc) {
+      const favMatch = metaDesc.match(/has (\d[\d,]*) favorites/i);
+      if (favMatch && favMatch[1]) {
+        favorites = favMatch[1].replace(/,/g, '');
+      }
+    }
 
     const rawDesc = $("[data-id='description-text']").text().trim();
     const description = rawDesc || "N/A";
@@ -199,6 +211,7 @@ export async function scrapeEtsy(url) {
       shopName,
       rating,
       listingReviews: listingReviewsFromPage,
+      favorites,
       estimatedRevenue: estimatedYearlyRevenue,
       estimatedMonthlyRevenue,
       demandScore,
@@ -217,6 +230,7 @@ export async function scrapeEtsy(url) {
       shopName: "N/A",
       rating: "N/A",
       listingReviews: "N/A",
+      favorites: "N/A",
       estimatedRevenue: "N/A",
       estimatedMonthlyRevenue: "N/A",
       demandScore: 0,
