@@ -7,10 +7,6 @@ dotenv.config();
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function calculateDemandScore(estimatedRevenue, reviews, favorites) {
   const revenue = parseInt(estimatedRevenue.replace(/[^\d]/g, "")) || 0;
   const reviewCount = parseInt(reviews) || 0;
@@ -33,26 +29,16 @@ function extractFallbackPricesFromText(text) {
   return [...new Set(filtered)];
 }
 
-async function fetchWithRetry(url, maxAttempts = 3, delayMs = 2000) {
-  const apiKey = process.env.SCRAPER_API_KEY;
-  const proxyUrl = (target) =>
-    `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(target)}`;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const res = await axios.get(proxyUrl(url));
-      return res.data;
-    } catch (err) {
-      console.warn(`❌ Retry ${attempt} failed: ${err.message}`);
-      if (attempt < maxAttempts) await sleep(delayMs);
-    }
-  }
-  throw new Error("Failed to fetch after retries");
-}
-
 export async function scrapeEtsy(url) {
+  const apiKey = process.env.SCRAPER_API_KEY;
+  if (!apiKey) throw new Error("SCRAPER_API_KEY not set");
+
+  const proxy = (url) =>
+    `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
+
   try {
-    const html = await fetchWithRetry(url);
+    const response = await axios.get(proxy(url));
+    const html = response.data;
     const $ = cheerio.load(html);
 
     let title =
@@ -65,9 +51,7 @@ export async function scrapeEtsy(url) {
     const priceOptions = [];
     $("select option").each((_, el) => {
       const text = $(el).text().trim();
-      if (text && /[\$€£]\d/.test(text) && !/views?/.test(text)) {
-        priceOptions.push(text);
-      }
+      if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
     });
 
     if (priceOptions.length === 0) {
@@ -84,7 +68,7 @@ export async function scrapeEtsy(url) {
       const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
       if (match) {
         const val = parseFloat(match[1]);
-        if (val >= 5 && val <= 1000) {
+        if (val >= 5) {
           prices.push(val);
           displayPrices.push(`$${val.toFixed(2)}`);
         }
@@ -114,10 +98,12 @@ export async function scrapeEtsy(url) {
 
     let listingReviewsFromPage = "N/A";
     $('button[role="tab"]').each((_, el) => {
-      const tabText = $(el).text().trim().toLowerCase();
-      if (tabText.includes("this item")) {
-        const rawNum = tabText.match(/(\d+(?:,\d+)?)/);
-        if (rawNum) listingReviewsFromPage = rawNum[1].replace(/,/g, "");
+      const tabText = $(el).text().trim();
+      if (tabText.toLowerCase().includes("this item")) {
+        const rawNum = tabText.match(/(\d+[,.\d]*)/);
+        if (rawNum) {
+          listingReviewsFromPage = rawNum[1].replace(/,/g, "").trim();
+        }
       }
     });
 
@@ -138,22 +124,16 @@ export async function scrapeEtsy(url) {
     });
 
     const avgPrice =
-      prices.length > 0
-        ? prices.reduce((sum, p) => sum + p, 0) / prices.length
-        : null;
+      prices.length > 0 ? prices.reduce((sum, p) => sum + p, 0) / prices.length : null;
 
     const estimatedMonthlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
-        ? `$${Math.round(
-            (parseInt(listingReviewsFromPage) * avgPrice) / 12
-          ).toLocaleString()}`
+        ? `$${Math.round((parseInt(listingReviewsFromPage) * avgPrice) / 12).toLocaleString()}`
         : "N/A";
 
     const estimatedYearlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
-        ? `$${Math.round(
-            parseInt(listingReviewsFromPage) * avgPrice
-          ).toLocaleString()}`
+        ? `$${Math.round(parseInt(listingReviewsFromPage) * avgPrice).toLocaleString()}`
         : "N/A";
 
     const demandScore = calculateDemandScore(
@@ -174,10 +154,9 @@ export async function scrapeEtsy(url) {
 
         if (shopName && shopName !== "N/A") {
           try {
-            const aboutHtml = await fetchWithRetry(
-              `https://www.etsy.com/shop/${shopName}/about`
-            );
-            const $$ = cheerio.load(aboutHtml);
+            const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
+            const aboutRes = await axios.get(proxy(aboutUrl));
+            const $$ = cheerio.load(aboutRes.data);
             const bodyText = $$.text();
 
             const yearMatch =
@@ -206,9 +185,7 @@ export async function scrapeEtsy(url) {
           });
 
           const rawTags = JSON.parse(aiRes.choices[0].message.content);
-          return rawTags.filter(
-            (t) => typeof t === "string" && t.length <= 20
-          );
+          return rawTags.filter((t) => typeof t === "string" && t.length <= 20);
         } catch (err) {
           console.error("❌ Failed to generate tags:", err.message);
           return [];
@@ -217,9 +194,7 @@ export async function scrapeEtsy(url) {
     ]);
 
     const shopCreationYear =
-      aboutData.status === "fulfilled"
-        ? aboutData.value.shopCreationYear
-        : "N/A";
+      aboutData.status === "fulfilled" ? aboutData.value.shopCreationYear : "N/A";
     const shopSales =
       aboutData.status === "fulfilled" ? aboutData.value.shopSales : "N/A";
     const tags = tagData.status === "fulfilled" ? tagData.value : [];
