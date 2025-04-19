@@ -7,6 +7,10 @@ dotenv.config();
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function calculateDemandScore(estimatedRevenue, reviews, favorites) {
   const revenue = parseInt(estimatedRevenue.replace(/[^\d]/g, "")) || 0;
   const reviewCount = parseInt(reviews) || 0;
@@ -29,28 +33,26 @@ function extractFallbackPricesFromText(text) {
   return [...new Set(filtered)];
 }
 
-async function extractFieldWithRetry(fn, fieldName, maxAttempts = 3) {
-  for (let i = 0; i < maxAttempts; i++) {
-    const value = fn();
-    if (value !== "N/A" && value !== undefined && value.length !== 0) {
-      return value;
+async function fetchWithRetry(url, maxAttempts = 3, delayMs = 2000) {
+  const apiKey = process.env.SCRAPER_API_KEY;
+  const proxyUrl = (target) =>
+    `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(target)}`;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await axios.get(proxyUrl(url));
+      return res.data;
+    } catch (err) {
+      console.warn(`❌ Retry ${attempt} failed: ${err.message}`);
+      if (attempt < maxAttempts) await sleep(delayMs);
     }
-    await new Promise((res) => setTimeout(res, 800)); // short delay
   }
-  console.warn(`⚠️ ${fieldName} failed after ${maxAttempts} attempts`);
-  return "N/A";
+  throw new Error("Failed to fetch after retries");
 }
 
 export async function scrapeEtsy(url) {
-  const apiKey = process.env.SCRAPER_API_KEY;
-  if (!apiKey) throw new Error("SCRAPER_API_KEY not set");
-
-  const proxy = (url) =>
-    `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
-
   try {
-    const response = await axios.get(proxy(url));
-    const html = response.data;
+    const html = await fetchWithRetry(url);
     const $ = cheerio.load(html);
 
     let title =
@@ -60,48 +62,45 @@ export async function scrapeEtsy(url) {
 
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
-    // Smart retry wrapper for price
-    const { prices, displayPrices } = await extractFieldWithRetry(() => {
-      const priceOptions = [];
-      $("select option").each((_, el) => {
-        const text = $(el).text().trim();
-        if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
-      });
-
-      if (priceOptions.length === 0) {
-        const salePrice = $(".wt-text-title-03").first().text().trim();
-        const originalPrice = $(".wt-text-strikethrough").first().text().trim();
-        const fallback = salePrice || originalPrice || "";
-        if (fallback) priceOptions.push(fallback);
+    const priceOptions = [];
+    $("select option").each((_, el) => {
+      const text = $(el).text().trim();
+      if (text && /[\$€£]\d/.test(text) && !/views?/.test(text)) {
+        priceOptions.push(text);
       }
+    });
 
-      const prices = [];
-      const displayPrices = [];
+    if (priceOptions.length === 0) {
+      const salePrice = $(".wt-text-title-03").first().text().trim();
+      const originalPrice = $(".wt-text-strikethrough").first().text().trim();
+      const fallback = salePrice || originalPrice || "";
+      if (fallback) priceOptions.push(fallback);
+    }
 
-      priceOptions.forEach((p) => {
-        const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
-        if (match) {
-          const val = parseFloat(match[1]);
-          if (val >= 5) {
-            prices.push(val);
-            displayPrices.push(`$${val.toFixed(2)}`);
-          }
+    let prices = [];
+    let displayPrices = [];
+
+    priceOptions.forEach((p) => {
+      const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
+      if (match) {
+        const val = parseFloat(match[1]);
+        if (val >= 5 && val <= 1000) {
+          prices.push(val);
+          displayPrices.push(`$${val.toFixed(2)}`);
+        }
+      }
+    });
+
+    if (prices.length === 0) {
+      const rawFallbackPrices = extractFallbackPricesFromText(html);
+      rawFallbackPrices.forEach((price) => {
+        const val = parseFloat(price.replace(/[^\d.]/g, ""));
+        if (val) {
+          prices.push(val);
+          displayPrices.push(`$${val.toFixed(2)}`);
         }
       });
-
-      if (prices.length === 0) {
-        const rawFallbackPrices = extractFallbackPricesFromText(html);
-        rawFallbackPrices.forEach((price) => {
-          const val = parseFloat(price.replace(/[^\d.]/g, ""));
-          if (val) {
-            prices.push(val);
-            displayPrices.push(`$${val.toFixed(2)}`);
-          }
-        });
-      }
-
-      return prices.length ? { prices, displayPrices } : null;
-    }, "Price");
+    }
 
     let shopName = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
@@ -113,27 +112,19 @@ export async function scrapeEtsy(url) {
       } catch {}
     });
 
-    // Smart retry for product reviews
-    const listingReviewsFromPage = await extractFieldWithRetry(() => {
-      let val = "N/A";
-      $('button[role="tab"]').each((_, el) => {
-        const tabText = $(el).text().trim();
-        if (tabText.toLowerCase().includes("this item")) {
-          const rawNum = tabText.match(/(\d+[,.\d]*)/);
-          if (rawNum) {
-            val = rawNum[1].replace(/,/g, "").trim();
-          }
-        }
-      });
-      return val;
-    }, "Reviews");
+    let listingReviewsFromPage = "N/A";
+    $('button[role="tab"]').each((_, el) => {
+      const tabText = $(el).text().trim().toLowerCase();
+      if (tabText.includes("this item")) {
+        const rawNum = tabText.match(/(\d+(?:,\d+)?)/);
+        if (rawNum) listingReviewsFromPage = rawNum[1].replace(/,/g, "");
+      }
+    });
 
-    // Smart retry for favorites
-    const favorites = await extractFieldWithRetry(() => {
-      const metaDesc = $('meta[name="description"]').attr("content");
-      const favMatch = metaDesc?.match(/has\s+(\d+)\s+favorites/i);
-      return favMatch ? favMatch[1] : "N/A";
-    }, "Favorites");
+    let favorites = "N/A";
+    const metaDesc = $('meta[name="description"]').attr("content");
+    const favMatch = metaDesc?.match(/has\s+(\d+)\s+favorites/i);
+    if (favMatch) favorites = favMatch[1];
 
     const rawDesc = $("[data-id='description-text']").text().trim();
     const description = rawDesc || "N/A";
@@ -147,16 +138,22 @@ export async function scrapeEtsy(url) {
     });
 
     const avgPrice =
-      prices?.length > 0 ? prices.reduce((sum, p) => sum + p, 0) / prices.length : null;
+      prices.length > 0
+        ? prices.reduce((sum, p) => sum + p, 0) / prices.length
+        : null;
 
     const estimatedMonthlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
-        ? `$${Math.round((parseInt(listingReviewsFromPage) * avgPrice) / 12).toLocaleString()}`
+        ? `$${Math.round(
+            (parseInt(listingReviewsFromPage) * avgPrice) / 12
+          ).toLocaleString()}`
         : "N/A";
 
     const estimatedYearlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
-        ? `$${Math.round(parseInt(listingReviewsFromPage) * avgPrice).toLocaleString()}`
+        ? `$${Math.round(
+            parseInt(listingReviewsFromPage) * avgPrice
+          ).toLocaleString()}`
         : "N/A";
 
     const demandScore = calculateDemandScore(
@@ -177,9 +174,10 @@ export async function scrapeEtsy(url) {
 
         if (shopName && shopName !== "N/A") {
           try {
-            const aboutUrl = `https://www.etsy.com/shop/${shopName}/about`;
-            const aboutRes = await axios.get(proxy(aboutUrl));
-            const $$ = cheerio.load(aboutRes.data);
+            const aboutHtml = await fetchWithRetry(
+              `https://www.etsy.com/shop/${shopName}/about`
+            );
+            const $$ = cheerio.load(aboutHtml);
             const bodyText = $$.text();
 
             const yearMatch =
@@ -208,7 +206,9 @@ export async function scrapeEtsy(url) {
           });
 
           const rawTags = JSON.parse(aiRes.choices[0].message.content);
-          return rawTags.filter((t) => typeof t === "string" && t.length <= 20);
+          return rawTags.filter(
+            (t) => typeof t === "string" && t.length <= 20
+          );
         } catch (err) {
           console.error("❌ Failed to generate tags:", err.message);
           return [];
@@ -217,14 +217,16 @@ export async function scrapeEtsy(url) {
     ]);
 
     const shopCreationYear =
-      aboutData.status === "fulfilled" ? aboutData.value.shopCreationYear : "N/A";
+      aboutData.status === "fulfilled"
+        ? aboutData.value.shopCreationYear
+        : "N/A";
     const shopSales =
       aboutData.status === "fulfilled" ? aboutData.value.shopSales : "N/A";
     const tags = tagData.status === "fulfilled" ? tagData.value : [];
 
     return {
       title,
-      price: displayPrices?.length ? displayPrices : "N/A",
+      price: displayPrices.length ? displayPrices : "N/A",
       shopName,
       rating,
       listingReviews: listingReviewsFromPage,
