@@ -7,16 +7,12 @@ dotenv.config();
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-function calculateDemandScore(estimatedRevenue, reviews, favorites) {
+function calculateDemandScore(estimatedRevenue, reviews) {
   const revenue = parseInt(estimatedRevenue.replace(/[^\d]/g, "")) || 0;
   const reviewCount = parseInt(reviews) || 0;
-  const favCount = parseInt(favorites) || 0;
-
-  const revenueScore = Math.min((revenue / 200000) * 40, 40);
-  const reviewScore = Math.min((reviewCount / 1000) * 40, 40);
-  const favoriteScore = Math.min((favCount / 1000) * 20, 20);
-
-  return Math.round(revenueScore + reviewScore + favoriteScore);
+  const revenueScore = Math.min((revenue / 200000) * 50, 50);
+  const reviewScore = Math.min((reviewCount / 1000) * 50, 50);
+  return Math.round(revenueScore + reviewScore);
 }
 
 function extractFallbackPricesFromText(text) {
@@ -111,12 +107,14 @@ export async function scrapeEtsy(url) {
       }
     });
 
-    // ✅ Favorites extraction
-    let favoriteCount = "N/A";
+    // ✅ Extract favorites
+    let favorites = "N/A";
     const metaDesc = $('meta[name="description"]').attr("content");
     if (metaDesc) {
-      const match = metaDesc.match(/has\s([\d,]+)\sfavorites/i);
-      if (match) favoriteCount = match[1].replace(/,/g, "");
+      const favMatch = metaDesc.match(/has ([\d,]+) favorites/i);
+      if (favMatch && favMatch[1]) {
+        favorites = favMatch[1].replace(/,/g, '');
+      }
     }
 
     const rawDesc = $("[data-id='description-text']").text().trim();
@@ -146,8 +144,7 @@ export async function scrapeEtsy(url) {
 
     const demandScore = calculateDemandScore(
       estimatedYearlyRevenue,
-      listingReviewsFromPage,
-      favoriteCount
+      listingReviewsFromPage
     );
 
     const category =
@@ -214,7 +211,7 @@ export async function scrapeEtsy(url) {
       shopName,
       rating,
       listingReviews: listingReviewsFromPage,
-      favorites: favoriteCount,
+      favorites,
       estimatedRevenue: estimatedYearlyRevenue,
       estimatedMonthlyRevenue,
       demandScore,
@@ -246,3 +243,4 @@ export async function scrapeEtsy(url) {
     };
   }
 }
+
