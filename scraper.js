@@ -29,6 +29,18 @@ function extractFallbackPricesFromText(text) {
   return [...new Set(filtered)];
 }
 
+async function extractFieldWithRetry(fn, fieldName, maxAttempts = 3) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const value = fn();
+    if (value !== "N/A" && value !== undefined && value.length !== 0) {
+      return value;
+    }
+    await new Promise((res) => setTimeout(res, 800)); // short delay
+  }
+  console.warn(`⚠️ ${fieldName} failed after ${maxAttempts} attempts`);
+  return "N/A";
+}
+
 export async function scrapeEtsy(url) {
   const apiKey = process.env.SCRAPER_API_KEY;
   if (!apiKey) throw new Error("SCRAPER_API_KEY not set");
@@ -48,43 +60,48 @@ export async function scrapeEtsy(url) {
 
     const rating = $("input[name='rating']").attr("value") || "N/A";
 
-    const priceOptions = [];
-    $("select option").each((_, el) => {
-      const text = $(el).text().trim();
-      if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
-    });
+    // Smart retry wrapper for price
+    const { prices, displayPrices } = await extractFieldWithRetry(() => {
+      const priceOptions = [];
+      $("select option").each((_, el) => {
+        const text = $(el).text().trim();
+        if (text && /[\$€£]\d/.test(text)) priceOptions.push(text);
+      });
 
-    if (priceOptions.length === 0) {
-      const salePrice = $(".wt-text-title-03").first().text().trim();
-      const originalPrice = $(".wt-text-strikethrough").first().text().trim();
-      const fallback = salePrice || originalPrice || "";
-      if (fallback) priceOptions.push(fallback);
-    }
-
-    let prices = [];
-    let displayPrices = [];
-
-    priceOptions.forEach((p) => {
-      const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
-      if (match) {
-        const val = parseFloat(match[1]);
-        if (val >= 5) {
-          prices.push(val);
-          displayPrices.push(`$${val.toFixed(2)}`);
-        }
+      if (priceOptions.length === 0) {
+        const salePrice = $(".wt-text-title-03").first().text().trim();
+        const originalPrice = $(".wt-text-strikethrough").first().text().trim();
+        const fallback = salePrice || originalPrice || "";
+        if (fallback) priceOptions.push(fallback);
       }
-    });
 
-    if (prices.length === 0) {
-      const rawFallbackPrices = extractFallbackPricesFromText(html);
-      rawFallbackPrices.forEach((price) => {
-        const val = parseFloat(price.replace(/[^\d.]/g, ""));
-        if (val) {
-          prices.push(val);
-          displayPrices.push(`$${val.toFixed(2)}`);
+      const prices = [];
+      const displayPrices = [];
+
+      priceOptions.forEach((p) => {
+        const match = p.match(/[\$€£](\d+(?:\.\d+)?)/);
+        if (match) {
+          const val = parseFloat(match[1]);
+          if (val >= 5) {
+            prices.push(val);
+            displayPrices.push(`$${val.toFixed(2)}`);
+          }
         }
       });
-    }
+
+      if (prices.length === 0) {
+        const rawFallbackPrices = extractFallbackPricesFromText(html);
+        rawFallbackPrices.forEach((price) => {
+          const val = parseFloat(price.replace(/[^\d.]/g, ""));
+          if (val) {
+            prices.push(val);
+            displayPrices.push(`$${val.toFixed(2)}`);
+          }
+        });
+      }
+
+      return prices.length ? { prices, displayPrices } : null;
+    }, "Price");
 
     let shopName = "N/A";
     $("script[type='application/ld+json']").each((_, el) => {
@@ -96,21 +113,27 @@ export async function scrapeEtsy(url) {
       } catch {}
     });
 
-    let listingReviewsFromPage = "N/A";
-    $('button[role="tab"]').each((_, el) => {
-      const tabText = $(el).text().trim();
-      if (tabText.toLowerCase().includes("this item")) {
-        const rawNum = tabText.match(/(\d+[,.\d]*)/);
-        if (rawNum) {
-          listingReviewsFromPage = rawNum[1].replace(/,/g, "").trim();
+    // Smart retry for product reviews
+    const listingReviewsFromPage = await extractFieldWithRetry(() => {
+      let val = "N/A";
+      $('button[role="tab"]').each((_, el) => {
+        const tabText = $(el).text().trim();
+        if (tabText.toLowerCase().includes("this item")) {
+          const rawNum = tabText.match(/(\d+[,.\d]*)/);
+          if (rawNum) {
+            val = rawNum[1].replace(/,/g, "").trim();
+          }
         }
-      }
-    });
+      });
+      return val;
+    }, "Reviews");
 
-    let favorites = "N/A";
-    const metaDesc = $('meta[name="description"]').attr("content");
-    const favMatch = metaDesc?.match(/has\s+(\d+)\s+favorites/i);
-    if (favMatch) favorites = favMatch[1];
+    // Smart retry for favorites
+    const favorites = await extractFieldWithRetry(() => {
+      const metaDesc = $('meta[name="description"]').attr("content");
+      const favMatch = metaDesc?.match(/has\s+(\d+)\s+favorites/i);
+      return favMatch ? favMatch[1] : "N/A";
+    }, "Favorites");
 
     const rawDesc = $("[data-id='description-text']").text().trim();
     const description = rawDesc || "N/A";
@@ -124,7 +147,7 @@ export async function scrapeEtsy(url) {
     });
 
     const avgPrice =
-      prices.length > 0 ? prices.reduce((sum, p) => sum + p, 0) / prices.length : null;
+      prices?.length > 0 ? prices.reduce((sum, p) => sum + p, 0) / prices.length : null;
 
     const estimatedMonthlyRevenue =
       avgPrice && listingReviewsFromPage !== "N/A"
@@ -201,7 +224,7 @@ export async function scrapeEtsy(url) {
 
     return {
       title,
-      price: displayPrices.length ? displayPrices : "N/A",
+      price: displayPrices?.length ? displayPrices : "N/A",
       shopName,
       rating,
       listingReviews: listingReviewsFromPage,
